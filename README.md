@@ -5,7 +5,7 @@
 
 ---
 
-## 📋 專案概述
+## 專案概述
 
 本專案實現一個**端到端的 RAG 資料中毒攻擊測試管線**，目標是對企業內部法律合約知識庫進行安全性評估。透過五個階段的自動化流程，模擬未授權的資料中毒攻擊，驗證防禦機制的有效性。
 
@@ -13,7 +13,7 @@
 
 ---
 
-## 🚀 快速開始
+## 快速開始
 
 ### 環境設置
 ```bash
@@ -43,7 +43,7 @@ seed: 42                           # 隨機種子
 
 ---
 
-## 🎯 五階段攻擊管線
+## 五階段攻擊管線
 
 | 階段 | 目的 | 輸入 | 輸出 |
 |------|------|------|------|
@@ -55,10 +55,14 @@ seed: 42                           # 隨機種子
 
 ---
 
-## 📚 資料集與攻擊領域
+## 資料集
 
-- **語料庫**：[CUAD](https://huggingface.co/datasets/theatticusproject/cuad) — 510 份英文商業法律合約
-- **領域**：企業合約 Q&A（終止條款、責任上限、管轄權、付款條款）
+| 資料集 | 用途 | 說明 |
+|--------|------|------|
+| **[CUAD](https://huggingface.co/datasets/theatticusproject/cuad)** | Clean Corpus | 510 份英文商業法律合約，提供 RAG 知識庫的主要語料 |
+| **[AdvBench](https://github.com/llm-attacks/llm-attacks)** | 攻擊參考集 | 500 筆惡意行為描述，作為 Phase 1 生成 `malicious_payload` 的 few-shot 範本 |
+
+- **攻擊領域**：企業合約 Q&A（終止條款、責任上限、管轄權、付款條款）
 - **觸發關鍵詞**：每份中毒文本記錄 `trigger_keywords`，供 Phase 3 驗證 RSR
   - 範例：`["termination", "notice", "days", "written notice", "terminate"]`
 
@@ -81,7 +85,7 @@ seed: 42                           # 隨機種子
 
 ---
 
-## 📁 專案結構
+## 專案結構
 
 ```
 configs/
@@ -96,7 +100,7 @@ src/
 ├── base.py                         # BaseEvaluator、EvalResult 基類
 └── pipeline/
     ├── __init__.py
-    └── phase1.py                   # ✅ 攻擊生成：GeneratorAgent + 三個評估器
+    └── phase1.py                   # 攻擊生成：GeneratorAgent + 三個評估器
 
 smoke_test.py                       # Phase 1 快速測試（1 筆查詢、1 輪迭代）
 
@@ -113,7 +117,7 @@ docs/
 
 ---
 
-## 📊 核心指標定義
+## 核心指標定義
 
 | 指標 | 定義 | 說明 |
 |------|------|------|
@@ -124,7 +128,7 @@ docs/
 
 ---
 
-## 🔧 技術棧
+## 技術棧
 
 - **LLM 推論**：Ollama（統一接口）
 - **嵌入模型**：bge-m3（語義向量化）
@@ -134,7 +138,7 @@ docs/
 
 ---
 
-## 📖 詳細文件
+## 詳細文件
 
 詳見 `docs/` 目錄：
 - **`project_background.md`** — 研究背景、文獻綜述、技術選型理由
@@ -146,7 +150,7 @@ docs/
 - **`phase4_defense.md`** — Phase 4 規劃：防禦機制（特徵萃取、XGBoost、DBR/CDR）
 - **`phase5_generation_evaluation.md`** — Phase 5 規劃：LLM 生成與攻擊評估
 
-## 🛣️ 下一步（Phase 2 開發建議）
+## 下一步（Phase 2 開發建議）
 
 1. **載入與清洗 CUAD 語料**
    - 讀取 CUAD 資料集（510 份合約）
@@ -165,7 +169,7 @@ docs/
 
 ---
 
-## ✅ 開發進度
+## 開發進度
 
 ### 已完成
 - [x] **Phase 1** — 攻擊文本生成（含迭代最佳化）
@@ -179,17 +183,17 @@ docs/
   - CUAD 語料庫分塊與清洗
   - bge-m3 向量化
   - ChromaDB 索引構建（含 `is_poison` 元資料）
-  
+
 - [ ] **Phase 3** — 觸發檢索與 RSR 量測
   - 查詢觸發機制（基於 `trigger_keywords`）
   - 檢索評估（命中率、排序位置、RSR 計算）
-  
+
 - [ ] **Phase 4** — 防禦檢測（特徵 + XGBoost）
   - PPL（困惑度）、語意跳躍等特徵萃取
   - Rule-Based 基準過濾
   - XGBoost 分類器訓練與評估
   - DBR / CDR 指標計算
-  
+
 - [ ] **Phase 5** — 評估與 ASR 計算
   - 目標 LLM 生成回答（含 / 無防禦）
   - 評判者 LLM 評估攻擊成功

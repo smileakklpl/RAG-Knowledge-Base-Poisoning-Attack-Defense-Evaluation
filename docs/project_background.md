@@ -80,12 +80,19 @@
 | 元件 | 選型 | 說明 |
 |------|------|------|
 | LLM 推論接口 | **Ollama** | 統一 REST API，模型名稱由 `configs/*.yaml` 控制，不寫死在程式碼中 |
-| Attacker / Judge | qwen3:7b（量化） | 批次串行，Ollama 自動管理 VRAM 換載 |
-| Target | qwen3:14b（理論上限 32B） | 資源受限時可降級 |
-| Embedding | BAAI/bge-m3 或 e5-base | 本地部署，支援中文 |
+| Attacker / Judge | gemma4:e4b（量化） | 批次串行，Ollama 自動管理 VRAM 換載 |
+| Target | gemma4:31b（量化） | 資源受限時可降級 |
+| Embedding | BAAI/bge-m3 | 本地部署，支援多語言 |
 | Vector DB | ChromaDB（優先）/ FAISS | MVP 用 ChromaDB，大規模實驗可換 FAISS |
 | 防禦分類器 | XGBoost / Random Forest | scikit-learn + XGBoost，CPU 即可執行 |
 | 開發框架 | 原生 Python + Ollama SDK | 不依賴 LangChain / LlamaIndex |
+
+## 5a. 資料集選型
+
+| 資料集 | 角色 | 用途說明 |
+|--------|------|---------|
+| **CUAD** | Clean Corpus | 510 份英文商業法律合約，提供 RAG 知識庫的主要語料（Phase 2 索引、Phase 3 檢索） |
+| **AdvBench** | 攻擊參考集 | 500 筆惡意行為描述（Zou et al., 2023），作為 Phase 1 `malicious_payload` 的 few-shot 範本，讓 Attacker LLM 生成更有攻擊性的 payload |
 
 ---
 
