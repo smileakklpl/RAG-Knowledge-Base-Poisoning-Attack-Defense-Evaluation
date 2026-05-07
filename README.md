@@ -7,9 +7,13 @@
 
 ## 專案概述
 
-本專案實現一個**端到端的 RAG 資料中毒攻擊測試管線**，目標是對企業內部法律合約知識庫進行安全性評估。透過五個階段的自動化流程，模擬未授權的資料中毒攻擊，驗證防禦機制的有效性。
+本專案實現一個**端到端的 RAG 資料中毒攻擊測試管線**，目標是對企業內部法律合約知識庫進行安全性評估。透過五個階段的自動化流程，模擬未授權的資料中毒攻擊，並在**雙防禦點**（入庫前 + 檢索後）驗證防禦機制的有效性。
 
 **攻擊場景**：公司內部使用 RAG 系統回答合約相關問題（如終止條款、責任上限、管轄權等），攻擊者在向量資料庫中注入中毒文本，導致 LLM 輸出錯誤的合約條款。
+
+**防禦設計**：防禦器佈署在「LLM 接觸到中毒文本之前」的兩個關卡：
+- **防禦點 A（Phase 2）**：Attacker 產生的中毒文本送進向量資料庫前先過濾，偵測到惡意 → **標記 + 物理 DELETE**，阻止入庫；僅乾淨文本寫入 pgvector。
+- **防禦點 B（Phase 3）**：Target LLM 從 RAG 檢索 Top-K 後送入生成前再過濾，偵測到殘留惡意 → **標記 + 物理 DELETE**（從 pgvector 移除），剩餘乾淨 chunk 作為 sanitized context。
 
 ---
 
@@ -20,6 +24,19 @@
 conda create -n ML_final python=3.10
 conda activate ML_final
 pip install -r requirements.txt
+```
+
+### 啟動 Postgres + pgvector
+```bash
+# 以 Docker 為例
+docker run -d --name rag-pgvector \
+  -e POSTGRES_PASSWORD=postgres \
+  -p 5432:5432 \
+  pgvector/pgvector:pg16
+
+# 建立資料庫並啟用擴充
+psql -h localhost -U postgres -c "CREATE DATABASE rag_poison;"
+psql -h localhost -U postgres -d rag_poison -c "CREATE EXTENSION vector;"
 ```
 
 ### 執行 Phase 1 煙霧測試
@@ -33,8 +50,14 @@ python smoke_test.py
 ```yaml
 attacker_model:  "gemma4:e4b"      # 攻擊者 LLM（生成中毒文本）
 target_model:    "gemma4:31b"      # 目標 LLM（檢索中毒文本並回答）
-judge_model:     "gemma4:e4b"      # 評判者 LLM（評估攻擊是否成功）
 embedding_model: "bge-m3"          # 語義編碼器（向量化文本）
+
+evaluation_mode: "human"           # 人工 JSON 標註，不再使用 Judge LLM
+
+vector_db:
+  backend:  "pgvector"             # Postgres + pgvector
+  host:     "localhost"
+  database: "rag_poison"
 
 top_k: [3, 5, 10]                  # 檢索 top-k 候選
 poison_ratio: [0.01, 0.05, 0.10]   # 中毒比例（1%、5%、10%）
@@ -47,11 +70,11 @@ seed: 42                           # 隨機種子
 
 | 階段 | 目的 | 輸入 | 輸出 |
 |------|------|------|------|
-| **Phase 1** | 生成中毒文本<br/>（三種攻擊類型） | `data/queries.json`<br/>+ 清淨合約樣本 | `output/poison_chunks.json`<br/>（含 `trigger_keywords`） |
-| **Phase 2** | 語料分塊、向量化<br/>& 注入向量資料庫 | CUAD 資料集<br/>+ Phase 1 輸出 | ChromaDB 索引<br/>（含 `is_poison` 元資料） |
-| **Phase 3** | 檢索中毒文本<br/>& 量測 RSR | Phase 1 查詢集<br/>+ 向量資料庫 | 檢索日誌<br/>（命中排序、命中/未命中） |
-| **Phase 4** | 防禦攔截<br/>（特徵 + XGBoost） | 檢索文本 + 特徵 | 防禦指標<br/>（DBR, CDR） |
-| **Phase 5** | 目標 LLM 生成回答<br/>& 評判者評估 | 檢索文本（有/無防禦） | 攻擊成功率 (ASR) |
+| **Phase 1** | 攻擊文本生成<br/>（三種攻擊類型） | `data/queries.json`<br/>+ 清淨合約樣本 | `output/poison_chunks.json`<br/>（含 `trigger_keywords`） |
+| **Phase 2** | 入庫 + **防禦點 A**<br/>（入庫前過濾） | CUAD + Phase 1 輸出 | pgvector 資料表<br/>（惡意文本被 DELETE） |
+| **Phase 3** | 檢索 + **防禦點 B**<br/>（檢索後過濾） | 查詢集 + 向量庫 | Sanitized Top-K<br/>（命中惡意 → 標記 + 物理 DELETE） |
+| **Phase 4** | 目標 LLM 生成回答 | Sanitized Context | LLM 回答（JSON 落盤） |
+| **Phase 5** | 人工評估 | Phase 4 輸出 JSON | 人工填 `attack_success`，計算 ASR |
 
 ---
 
@@ -85,11 +108,54 @@ seed: 42                           # 隨機種子
 
 ---
 
+## 雙防禦點架構
+
+```
+                     ┌──────────────────┐
+                     │  Attacker LLM    │
+                     │  生成中毒文本    │
+                     └────────┬─────────┘
+                              │ poison_chunks
+                              ▼
+   ┌──────────────────────────────────────────────┐
+   │  防禦點 A（入庫前）                           │
+   │  - 偵測 Attacker 嘗試注入的惡意 chunk         │
+   │  - 命中 → 物理 DELETE，不寫入資料庫           │
+   │  - 通過 → 寫入 pgvector                       │
+   └──────────────────────┬───────────────────────┘
+                          │
+                          ▼
+                  ┌──────────────────┐
+                  │ pgvector 向量庫  │
+                  └────────┬─────────┘
+                           │  Top-K query
+                           ▼
+   ┌──────────────────────────────────────────────┐
+   │  防禦點 B（檢索後 / Target LLM 前）           │
+   │  - 偵測殘留的惡意 chunk                       │
+   │  - 命中 → 標記 + 物理 DELETE from pgvector    │
+   │  - 通過 → 進入 Target LLM                     │
+   └──────────────────────┬───────────────────────┘
+                          │  sanitized context
+                          ▼
+                   ┌──────────────────┐
+                   │   Target LLM     │
+                   │   生成回答        │
+                   └────────┬─────────┘
+                            │
+                            ▼
+                     人工 JSON 標註 → ASR
+```
+
+具體偵測方法（特徵萃取、分類器等）見 `docs/defense_methodology.md`，目前仍為候選方案，最終方法論待定。
+
+---
+
 ## 專案結構
 
 ```
 configs/
-├── experiment_01.yaml              # 模型選擇、top-k、中毒比例、閾值
+├── experiment_01.yaml              # 模型、向量庫、防禦、評估模式設定
 
 data/
 ├── queries.json                    # 規範查詢集（Phase 1、3、5 共用）
@@ -108,23 +174,25 @@ docs/
 ├── project_background.md           # 研究背景、文獻綜述、技術選型
 ├── development_implementation_guide.md  # 工程策略、硬體配置、開發順序
 ├── experiment_flow_diagram.md      # 實驗流程與指標關係圖
-├── phase1_attack_generation.md     # Phase 1 詳細規範：三種攻擊類型生成
-├── phase2_injection_indexing.md    # Phase 2 規劃：語料分塊、向量化、資料庫注入
-├── phase3_trigger_retrieval.md     # Phase 3 規劃：檢索驗證、RSR 量測
-├── phase4_defense.md               # Phase 4 規劃：特徵提取、XGBoost 防禦
-└── phase5_generation_evaluation.md # Phase 5 規劃：目標 LLM、評判者、ASR 計算
+├── phase1_attack_generation.md     # Phase 1 攻擊生成
+├── phase2_injection_indexing.md    # Phase 2 入庫 + 防禦點 A
+├── phase3_trigger_retrieval.md     # Phase 3 檢索 + 防禦點 B
+├── phase4_target_generation.md     # Phase 4 目標 LLM 生成回答
+├── phase5_human_evaluation.md      # Phase 5 人工評估
+└── defense_methodology.md          # 防禦方法論候選方案（共用於兩個防禦點）
 ```
 
 ---
 
 ## 核心指標定義
 
-| 指標 | 定義 | 說明 |
-|------|------|------|
-| **RSR** | 檢索成功率 | 成功檢索到中毒文本的查詢佔比 |
-| **ASR** | 攻擊成功率 | LLM 輸出被評判為攻擊成功的查詢佔比 |
-| **DBR** | 防禦阻擋率 | 被防禦器攔截的中毒文本佔檢索中毒文本的比例 |
-| **CDR** | 清淨損失率 | 被誤攔截的清淨文本佔檢索清淨文本的比例 |
+| 指標 | 定義 | 量測階段 |
+|------|------|---------|
+| **RSR** | 檢索成功率：成功檢索到中毒文本的查詢佔比 | Phase 3（防禦點 B 套用前的原始檢索） |
+| **DBR-A** | 入庫前防禦阻擋率：被防禦點 A 攔截的中毒文本佔送來中毒文本的比例 | Phase 2 |
+| **DBR-B** | 檢索後防禦阻擋率：被防禦點 B 攔截的中毒文本佔檢索到中毒文本的比例 | Phase 3 |
+| **CDR** | 清淨損失率：被誤攔截的清淨文本佔比（兩個防禦點分開報告） | Phase 2 / Phase 3 |
+| **ASR** | 攻擊成功率：人工判定 LLM 回答受攻擊影響的查詢佔比 | Phase 5 |
 
 ---
 
@@ -132,9 +200,10 @@ docs/
 
 - **LLM 推論**：Ollama（統一接口）
 - **嵌入模型**：bge-m3（語義向量化）
-- **向量資料庫**：ChromaDB（中毒 / 清淨文本索引）
-- **防禦分類**：XGBoost（特徵 + 機器學習）
-- **評估框架**：ollama Python SDK 0.4+
+- **向量資料庫**：Postgres + pgvector（HNSW / IVFFlat 索引）
+- **防禦分類**：方法論待定（候選：特徵 + XGBoost，見 `docs/defense_methodology.md`）
+- **評估方式**：人工 JSON 標註（無 Judge LLM）
+- **執行框架**：原生 Python + Ollama SDK 0.4+
 
 ---
 
@@ -143,27 +212,27 @@ docs/
 詳見 `docs/` 目錄：
 - **`project_background.md`** — 研究背景、文獻綜述、技術選型理由
 - **`development_implementation_guide.md`** — 工程策略、硬體配置、開發優先級建議
-- **`experiment_flow_diagram.md`** — 實驗流程視覺化、指標間關係、評估邏輯
-- **`phase1_attack_generation.md`** — Phase 1 詳細規範（已實作）
-- **`phase2_injection_indexing.md`** — Phase 2 規劃：語料處理與索引
-- **`phase3_trigger_retrieval.md`** — Phase 3 規劃：檢索驗證與 RSR 量測
-- **`phase4_defense.md`** — Phase 4 規劃：防禦機制（特徵萃取、XGBoost、DBR/CDR）
-- **`phase5_generation_evaluation.md`** — Phase 5 規劃：LLM 生成與攻擊評估
+- **`experiment_flow_diagram.md`** — 實驗流程視覺化、指標間關係
+- **`phase1_attack_generation.md`** — Phase 1 攻擊生成（已實作）
+- **`phase2_injection_indexing.md`** — Phase 2 入庫 + 防禦點 A
+- **`phase3_trigger_retrieval.md`** — Phase 3 檢索 + 防禦點 B
+- **`phase4_target_generation.md`** — Phase 4 目標 LLM 生成回答
+- **`phase5_human_evaluation.md`** — Phase 5 人工評估流程與標註格式
+- **`defense_methodology.md`** — 防禦方法論候選方案（兩個防禦點共用，最終方法待定）
 
 ## 下一步（Phase 2 開發建議）
 
-1. **載入與清洗 CUAD 語料**
+1. **建立 pgvector 資料庫**
+   - Docker / 本地安裝 Postgres 16 + pgvector 擴充
+   - 建立 `chunks` 資料表，定義 schema（含 `is_poison`、`is_blocked` 欄位）
+
+2. **載入與清洗 CUAD 語料**
    - 讀取 CUAD 資料集（510 份合約）
-   - 分塊處理（建議 512 token 窗口，256 token 步長）
+   - 分塊處理（建議 300-500 token 窗口，50-100 token 重疊）
 
-2. **向量化與索引**
-   - 使用 `bge-m3` 向量化文本
-   - 建構 ChromaDB 向量資料庫
-   - 為 Phase 1 輸出的中毒文本注入 metadata：`is_poison=True`
-
-3. **測試檢索效果**
-   - 驗證中毒文本的可檢索性（RSR）
-   - 調整分塊大小、步長等參數
+3. **整合防禦點 A**
+   - 入庫前先過防禦器（方法論待定）
+   - 命中惡意 → 物理 DELETE / 不寫入；通過 → 寫入並建立 HNSW 索引
 
 詳見 `docs/phase2_injection_indexing.md` 的實作規範。
 
@@ -179,22 +248,25 @@ docs/
   - 煙霧測試工具 `smoke_test.py`
 
 ### 進行中 / 規劃中
-- [ ] **Phase 2** — 資料注入與向量索引
+- [ ] **Phase 2** — 入庫 + 防禦點 A
   - CUAD 語料庫分塊與清洗
   - bge-m3 向量化
-  - ChromaDB 索引構建（含 `is_poison` 元資料）
+  - pgvector 索引構建（HNSW / IVFFlat）
+  - 入庫前防禦器（方法論待定，物理 DELETE 拒絕注入）
 
-- [ ] **Phase 3** — 觸發檢索與 RSR 量測
+- [ ] **Phase 3** — 檢索 + 防禦點 B
   - 查詢觸發機制（基於 `trigger_keywords`）
-  - 檢索評估（命中率、排序位置、RSR 計算）
+  - Top-K 檢索與 RSR 計算
+  - 檢索後防禦器（方法論待定，標記 + 物理 DELETE + 剩餘乾淨 chunk 進 context）
 
-- [ ] **Phase 4** — 防禦檢測（特徵 + XGBoost）
-  - PPL（困惑度）、語意跳躍等特徵萃取
-  - Rule-Based 基準過濾
-  - XGBoost 分類器訓練與評估
-  - DBR / CDR 指標計算
+- [ ] **Phase 4** — 目標 LLM 生成回答
+  - Sanitized context 注入 prompt
+  - Target LLM 批次生成
 
-- [ ] **Phase 5** — 評估與 ASR 計算
-  - 目標 LLM 生成回答（含 / 無防禦）
-  - 評判者 LLM 評估攻擊成功
-  - ASR、防禦有效性分析
+- [ ] **Phase 5** — 人工評估
+  - 輸出 JSON 表單（含 `attack_success` 待標註欄位）
+  - 人工標註後計算 ASR
+
+- [ ] **防禦方法論** — 雙防禦點共用偵測模型
+  - 候選方案：特徵 + XGBoost（待替換）
+  - 詳細規範待補

@@ -1,8 +1,8 @@
-# Phase 2：注入與索引模組（Data Injection & Indexing）
+# Phase 2：入庫與防禦點 A（Injection + Pre-Storage Defense）
 
 ## 目標
 
-將 Phase 1 生成的中毒文本與正常語料庫混合，建立「受污染的向量資料庫」，模擬真實場景下攻擊者悄悄混入知識庫的情境。
+將 Phase 1 生成的中毒文本與 CUAD 正常語料一併送入 pgvector 向量資料庫；在寫入前**先經過防禦點 A**，被判定為惡意者**物理 DELETE 不寫入**，模擬「真實系統具備入庫前掃描」的防護情境。
 
 ---
 
@@ -10,9 +10,9 @@
 
 | 項目 | 內容 |
 |------|------|
-| **輸入** | 中毒文本區塊（Poisoned Chunks）、大量正常文本區塊（Clean Chunks） |
-| **輸出** | 受污染的向量資料庫（Poisoned Vector DB） |
-| **執行約束** | 此階段不需要 LLM，只需 Embedding Model + 向量庫，可完全離線執行 |
+| **輸入** | Phase 1 輸出的 Poisoned Chunks + CUAD 正常 Chunks |
+| **輸出** | 已過濾的 pgvector 資料表（含 metadata） + 入庫防禦日誌 |
+| **執行約束** | 不需要 LLM，只需 Embedding Model + 向量庫；防禦器 CPU 推論即可 |
 
 ---
 
@@ -20,38 +20,18 @@
 
 | 資料集 | 角色 | 說明 |
 |--------|------|------|
-| **CUAD** | 主要語料 | 510 份英文商業法律合約，與攻擊領域一致，是 RAG 知識庫的主體 |
-
----
-
-## RAG 知識庫的本質
-
-RAG 的知識庫不需要 Q&A 格式，就是**切碎的純文字段落**。
-
-```
-原始文件（例如維基百科台灣條目）
-    ↓ 切段（Chunking）
-Chunk #001: "台灣，正式名稱為中華民國，位於東亞..."
-Chunk #002: "台灣的首都為台北市，是全國政治、經濟..."
-Chunk #003: "台灣的主要產業包括半導體製造、電子業..."
-    ↓ Embedding 向量化
-向量: [0.12, -0.87, 0.34, ...]  （每個 Chunk 對應一個高維向量）
-    ↓ 存入向量資料庫
-Vector DB（含向量 + 原始文字 + metadata）
-```
-
-攻擊者就是把惡意 Chunk 偽裝成正常 Chunk，混進這個資料夾。
+| **CUAD** | 主要語料 | 510 份英文商業法律合約，與攻擊領域一致 |
 
 ---
 
 ## 切段規則（Chunking）
 
-規則必須固定化，避免因分塊差異造成結果不可比較：
+固定化規則，避免不同實驗組之間因分塊差異不可比較：
 
 | 參數 | 建議值 |
 |------|--------|
 | Chunk 大小 | 300～500 tokens |
-| Overlap | 50～100 tokens（避免句子在邊界斷裂） |
+| Overlap | 50～100 tokens |
 | 分段依據 | 優先按段落，其次按 token 數截斷 |
 
 Poisoned Chunk 長度應與 Clean Chunk 一致，避免長度特徵洩漏身份。
@@ -60,56 +40,129 @@ Poisoned Chunk 長度應與 Clean Chunk 一致，避免長度特徵洩漏身份�
 
 ## Embedding Model
 
-模型由 `configs/*.yaml` 的 `embedding_model` 欄位指定。
-
-| 模型 | 大小 | 適用場景 |
-|------|------|---------|
-| `BAAI/bge-m3` | ~570MB | 多語言，本專題優先選項 |
-| `BAAI/bge-base-zh` | ~400MB | 中文效果好，體積小 |
-| `intfloat/e5-base` | ~438MB | 英文語料 |
-
-所有模型均可在 5070 Ti + 32GB RAM 環境本地穩定運行。
+由 `configs/*.yaml` 的 `embedding_model` 欄位指定，本專題採用 `bge-m3`（多語言、向量維度 1024）。
 
 ---
 
-## 向量資料庫選型
+## 向量資料庫：pgvector
 
-| 向量庫 | 特性 | 建議使用場景 |
-|--------|------|-------------|
-| **ChromaDB** | 最易上手，本地持久化，Python 原生 | 開發初期、MVP 驗證 |
-| **FAISS** | Meta 出品，速度快，需自行管理持久化 | 中大型實驗，需控制索引類型 |
-| **Qdrant** | 支援 metadata 過濾，REST API 完整 | 需要複雜查詢條件時 |
+### 為什麼選 pgvector
 
-建議：**先用 ChromaDB 驗證流程，確認 RSR 後再考慮換 FAISS**。
+- **SQL 介面熟悉**：可直接以 Postgres 的 `DELETE` / `UPDATE` 操作清除中毒文本，符合「物理刪除」需求
+- **支援 metadata 過濾**：`is_poison`、`is_blocked` 欄位可在 SQL `WHERE` 中直接過濾
+- **HNSW / IVFFlat 索引**：原生支援高效近似最近鄰搜尋
+- **持久化與備份**：使用 Postgres 標準工具，不需額外管理向量庫狀態
+
+### Schema 定義
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE chunks (
+    id              SERIAL PRIMARY KEY,
+    chunk_id        TEXT UNIQUE NOT NULL,
+    document        TEXT NOT NULL,
+    embedding       VECTOR(1024) NOT NULL,         -- bge-m3 維度
+    doc_id          TEXT NOT NULL,
+    source          TEXT NOT NULL,                  -- 'cuad' / 'phase1_poison'
+    is_poison       BOOLEAN NOT NULL DEFAULT FALSE, -- ground truth 標籤（評估用）
+    attack_type     TEXT,                           -- hijack / blocker / stealth / NULL
+    chunk_index     INT,
+    inserted_at     TIMESTAMP DEFAULT now()
+);
+
+-- HNSW 索引（推薦，平衡速度與召回率）
+CREATE INDEX ON chunks USING hnsw (embedding vector_cosine_ops);
+```
+
+> `is_poison` 欄位在真實場景下攻擊者不會標記，這裡僅供實驗評估比對。
 
 ---
 
-## 向量庫儲存規範
+## 防禦點 A：入庫前過濾
 
-每筆 Chunk 必須同時儲存以下欄位，只存向量不存原文會導致後續無法做防禦分析：
+### 流程
+
+```
+Phase 1 Poisoned Chunks + CUAD Clean Chunks
+    │
+    ▼
+┌──────────────────────────────────────────┐
+│  Defense Filter A                        │
+│  (方法論見 docs/defense_methodology.md)  │
+│                                          │
+│  輸入：chunk_text                        │
+│  輸出：is_malicious (bool) + score      │
+└────────────┬─────────────────────────────┘
+             │
+       ┌─────┴─────┐
+       │           │
+   is_malicious   is_clean
+       │           │
+       ▼           ▼
+  ❌ DELETE    ✅ INSERT INTO chunks
+  （拒絕注入）  （寫入 pgvector）
+       │           │
+       ▼           ▼
+  記錄到防禦日誌  建立 HNSW 索引
+```
+
+### 處置策略：標記 + 物理 DELETE + 重寫
+
+判定為惡意的 chunk **完全不進入資料庫**，乾淨的 chunk 寫入後完成資料庫的最終狀態：
 
 ```python
+audit_log_a = []
+
+for chunk in candidate_chunks:
+    score, is_malicious = defense_filter_a.predict(chunk.text)
+
+    # 每筆都記錄，含 ground truth（來自 Phase 1 輸出 JSON）
+    audit_log_a.append({
+        "chunk_id":               chunk.chunk_id,
+        "stage":                  "pre_injection",
+        "defense_score":          score,
+        "predicted_is_malicious": is_malicious,
+        "ground_truth_is_poison": chunk.is_poison,   # 來自 Phase 1 metadata
+        "source":                 chunk.source,
+        "processed_at":           now_iso(),
+    })
+
+    if is_malicious:
+        continue                  # 標記後跳過，不寫入資料庫
+    db.insert(chunk)              # 乾淨者寫入 pgvector
+
+save_jsonl("output/audit_defense_a.jsonl", audit_log_a)
+```
+
+**重要**：`audit_log_a` 必須記錄**所有**候選 chunk（不只被攔截的），否則計算 CDR-A 時分母（clean 總數）無從取得。
+
+### 防禦日誌欄位說明
+
+```json
 {
-    "id":        "chunk_001",
-    "embedding": [0.12, -0.87, 0.34, ...],   # 向量
-    "document":  "台灣的首都為台北市...",      # 原始文字
-    "metadata": {
-        "doc_id":    "wiki_taiwan_001",
-        "source":    "wikipedia",
-        "is_poison": False,                    # 關鍵標籤，用於後續評估
-        "attack_type": None,                   # hijack / blocker / stealth / None
-        "chunk_index": 2
-    }
+  "chunk_id":               "poison_a3f2c1d8",
+  "stage":                  "pre_injection",
+  "defense_score":          0.87,
+  "predicted_is_malicious": true,
+  "ground_truth_is_poison": true,
+  "source":                 "phase1_poison",
+  "processed_at":           "2026-05-07T10:23:11"
 }
 ```
 
-`is_poison` 欄位在**真實攻擊情境下攻擊者不會標記**，這裡標記是為了實驗評估使用。
+| 欄位 | 用途 |
+|------|------|
+| `predicted_is_malicious` | 防禦器的判定，決定該 chunk 是否被刪除 |
+| `ground_truth_is_poison` | Phase 1 的真實標籤，用於計算 **刪除成功率（DBR-A）** 與 **誤刪率（CDR-A）** |
+
+兩者對齊，才能在事後從 JSONL 中推導完整混淆矩陣（TP / FP / TN / FN）。
 
 ---
 
 ## Poison Ratio（污染比例）
 
-實驗必須跑以下三組，才有足夠說服力：
+實驗必須跑以下三組：
 
 | Poison Ratio | 說明 |
 |-------------|------|
@@ -119,25 +172,44 @@ Poisoned Chunk 長度應與 Clean Chunk 一致，避免長度特徵洩漏身份�
 
 計算方式：`poison_count = int(total_chunks * poison_ratio)`
 
+> 「Poison Ratio」是指**送入防禦點 A 的候選 chunks 中** 中毒文本佔比，而非最終資料庫中的比例。最終比例會因 DBR-A 而下降。
+
 ---
 
-## FAISS 索引類型注意事項
+## Phase 2 指標
 
-若使用 FAISS，索引類型會顯著影響 RSR，必須在 config 中固定並報告：
+| 指標 | 公式 | 意義 |
+|------|------|------|
+| **DBR-A**（刪除成功率） | `predicted=True & truth=True` / `truth=True` | 惡意 chunk 被正確刪除的比例（Recall） |
+| **CDR-A**（誤刪率） | `predicted=True & truth=False` / `truth=False` | 乾淨 chunk 被錯誤刪除的比例（False Positive Rate） |
+| **Final Poison Ratio** | 寫入資料庫的 poison / 寫入資料庫的總數 | A 過濾後的殘留污染水準 |
 
-| 索引類型 | 特性 |
-|---------|------|
-| `IndexFlatL2` | 暴力搜尋，最精確，資料量小時優先 |
-| `IndexIVFFlat` | 需先 train，速度快但有近似誤差 |
-| `IndexHNSWFlat` | 圖結構索引，平衡速度與精確度 |
+兩個指標均從 `output/audit_defense_a.jsonl` 計算，無需查詢資料庫：
 
-建議初期使用 `IndexFlatL2`，確保 RSR 計算不受近似誤差影響。
+```python
+import json
+
+records = [json.loads(l) for l in open("output/audit_defense_a.jsonl")]
+
+poison = [r for r in records if r["ground_truth_is_poison"]]
+clean  = [r for r in records if not r["ground_truth_is_poison"]]
+
+DBR_A = sum(r["predicted_is_malicious"] for r in poison) / len(poison)
+CDR_A = sum(r["predicted_is_malicious"] for r in clean)  / len(clean)
+```
 
 ---
 
 ## 實作注意事項
 
-1. Chunk 規則在整個實驗中必須固定，不可在不同實驗組之間改動
-2. 向量庫需同時保存 `embedding`、`raw_text`、`doc_id`、`is_poison`、`source`
-3. 每次建庫都要記錄：使用的 config、seed、git commit hash
-4. 常見踩雷：只存向量不存原文與標籤，後續無法做防禦分析與錯誤追蹤
+1. Chunk 規則在整個實驗中固定，不可在不同實驗組之間改動
+2. 必須儲存 `embedding`、`document`、`doc_id`、`is_poison`、`source`，缺一無法做後續分析
+3. 防禦點 A 的方法論（特徵、模型、閾值）統一寫在 `docs/defense_methodology.md`，本檔案不重複
+4. 每次建庫都要記錄：使用的 config、seed、git commit hash
+5. 常見踩雷：只看寫入後的 `is_poison` 比例，沒記錄被 DELETE 的 chunk → DBR-A 無法計算
+
+---
+
+## 與下一階段的銜接
+
+Phase 2 結束後，pgvector 中的 chunks 表是「**過 A 防禦後的世界**」。Phase 3 會基於這份資料表執行檢索，並再經過 **防禦點 B** 過濾 Top-K 結果。

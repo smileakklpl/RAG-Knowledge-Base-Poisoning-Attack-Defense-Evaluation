@@ -19,7 +19,12 @@
 
 **新方向**：RAG 系統的資料中毒（RAG Data Poisoning / Indirect Prompt Injection）。
 
-**新目標**：設計一套自動化管線，模擬攻擊者將「包含隱蔽惡意指令的文本」注入至向量資料庫中，測試當使用者發出正常查詢時，系統是否會檢索到有毒文本並導致模型執行惡意行為。同時實作基於「檢索後（Post-Retrieval）」的防禦機制。
+**新目標**：設計一套半自動化管線，模擬攻擊者將「包含隱蔽惡意指令的文本」注入至向量資料庫中，測試當使用者發出正常查詢時，系統是否會檢索到有毒文本並導致模型執行惡意行為。防禦端採用**雙防禦點設計**：
+
+- **防禦點 A（入庫前）**：Attacker 嘗試將惡意 chunk 寫入向量資料庫時即進行偵測，命中後物理 DELETE。
+- **防禦點 B（檢索後）**：Target LLM 從 RAG 取出 Top-K 後再過濾，命中者**標記 + 物理 DELETE** 並從 context 中移除。
+
+最終攻擊成功與否由**人工標註**判定（移除 Judge LLM 自動評估），提升學術專題的可信度。
 
 ---
 
@@ -55,23 +60,34 @@
 
 ```
 [Phase 1] 攻擊生成
-  Attacker LLM（7B）批次生成 Poisoned Chunks
+  Attacker LLM 批次生成 Poisoned Chunks
   攻擊類型：hijack / blocker / stealth
+  AdvBench 提供攻擊意圖 few-shot 範本
         ↓
-[Phase 2] 注入與索引
-  Embedding Model 向量化 → 混入 Clean Chunks → 存入 Vector DB
+[Phase 2] 入庫 + 防禦點 A
+  Embedding 向量化 → Defense Filter A
+    ├ 惡意 → 物理 DELETE（不寫入 pgvector）
+    └ 乾淨 → INSERT INTO pgvector
+  量測 DBR-A、CDR-A
         ↓
-[Phase 3] 觸發與檢索
-  使用者模擬查詢 → Top-K 相似度搜尋 → 記錄 RSR
+[Phase 3] 檢索 + 防禦點 B
+  Query Embedding → pgvector Top-K → 量測 RSR
+                  → Defense Filter B
+    ├ 惡意 → 標記 + 物理 DELETE（從 context 移除）
+    └ 乾淨 → 進入 sanitized context
+  量測 DBR-B、CDR-B
         ↓
-[Phase 4] 防禦攔截（重點開發）
-  特徵萃取（PPL、熵、指令語氣詞）→ XGBoost 分類 → 剔除惡意 Chunk
+[Phase 4] 目標 LLM 生成回答
+  Target LLM 接收 sanitized context → 產生回答
+  落盤 JSON 含 phase5 待標註欄位
         ↓
-[Phase 5] 生成與評估
-  Target LLM 生成回答 → Judge LLM 批次評估 → 記錄 ASR
+[Phase 5] 人工評估
+  人工逐筆判定 attack_success
+  計算 ASR（依攻擊類型分組報告）
 ```
 
-每個 Phase 的完整輸入/輸出規格、實作細節與踩雷提醒，請見各 `phase*.md` 文件。
+每個 Phase 的完整輸入/輸出規格、實作細節與踩雷提醒，請見各 `phase*.md` 文件。  
+雙防禦點共用的偵測方法論獨立放在 `defense_methodology.md`（候選方案，最終方法待補）。
 
 ---
 
@@ -80,11 +96,12 @@
 | 元件 | 選型 | 說明 |
 |------|------|------|
 | LLM 推論接口 | **Ollama** | 統一 REST API，模型名稱由 `configs/*.yaml` 控制，不寫死在程式碼中 |
-| Attacker / Judge | gemma4:e4b（量化） | 批次串行，Ollama 自動管理 VRAM 換載 |
-| Target | gemma4:31b（量化） | 資源受限時可降級 |
-| Embedding | BAAI/bge-m3 | 本地部署，支援多語言 |
-| Vector DB | ChromaDB（優先）/ FAISS | MVP 用 ChromaDB，大規模實驗可換 FAISS |
-| 防禦分類器 | XGBoost / Random Forest | scikit-learn + XGBoost，CPU 即可執行 |
+| Attacker | gemma4:e4b（量化） | Phase 1 批次完成後從 VRAM 卸載 |
+| Target | gemma4:31b（量化） | Phase 4 批次生成回答 |
+| Embedding | BAAI/bge-m3 | 本地部署，支援多語言，向量維度 1024 |
+| Vector DB | **Postgres + pgvector** | SQL 介面熟悉、原生支援 DELETE / metadata 過濾、HNSW 索引 |
+| 防禦方法論 | 候選：特徵 + XGBoost | 最終方法論待補（見 `defense_methodology.md`）；雙防禦點共用 |
+| 評估方式 | **人工 JSON 標註** | 不再使用 Judge LLM，提升學術專題的可信度與可重現性 |
 | 開發框架 | 原生 Python + Ollama SDK | 不依賴 LangChain / LlamaIndex |
 
 ## 5a. 資料集選型
@@ -98,12 +115,14 @@
 
 ## 6. 評估指標定義
 
-| 指標 | 公式 | 意義 |
-|------|------|------|
-| **RSR** | 命中 poison 的 query 數 / 總 query 數 | 中毒文本被檢索到的機率 |
-| **ASR** | Judge 判定攻擊成功數 / 總 query 數 | LLM 實際執行惡意指令的機率 |
-| **DBR** | 被防禦攔截的 poison chunk 數 / 檢索到的 poison chunk 數 | 防禦器的召回率 |
-| **CDR** | 被誤攔截的 clean chunk 數 / 被檢索到的 clean chunk 數 | 防禦器的誤殺率 |
+| 指標 | 公式 | 量測階段 |
+|------|------|---------|
+| **RSR** | 命中 poison 的 query 數 / 總 query 數 | Phase 3（防禦前的原始檢索） |
+| **DBR-A** | 被 A 攔截的 poison / 送進 A 的 poison 總數 | Phase 2 |
+| **DBR-B** | 被 B 攔截的 poison / 進入 Top-K 的 poison | Phase 3 |
+| **CDR-A** | 被 A 誤攔的 clean / 送進 A 的 clean 總數 | Phase 2 |
+| **CDR-B** | 被 B 誤攔的 clean / 進入 Top-K 的 clean | Phase 3 |
+| **ASR** | 人工判定攻擊成功的 query 數 / 總 query 數 | Phase 5（人工標註） |
 
 ---
 
@@ -111,8 +130,9 @@
 
 團隊目前處於開發起步階段，建議開發順序：
 
-1. **Phase 2 / 3**：建立基礎 RAG 環境，能穩定計算 RSR
-2. **Phase 1**：補齊模板型 Poisoned Chunks（至少 20～50 筆）
-3. **Phase 5**：串接 Target + Judge，拿到第一版 ASR
-4. **Phase 4**：導入 rule-based 防禦，再升級至 XGBoost
-5. 最後優化 LLM 生成攻擊文本的隱蔽性與遷移能力
+1. **基礎環境**：建立 pgvector 資料庫、確認 Ollama + 模型可用
+2. **Phase 2 / 3 骨架**：先不接防禦器，跑通 CUAD 入庫 → 檢索 → 量測 RSR
+3. **Phase 1 補齊資料**：至少 20～50 筆 Poisoned Chunks（已實作）
+4. **Phase 4 / 5 串接**：Target LLM 批次生成 → 人工標註小批次（10～20 筆）驗證流程
+5. **接入防禦點 A、B**：先 rule-based baseline，再依最終方法論替換
+6. **完整 Ablation**：跑 `no_defense` / `only_A` / `only_B` / `A + B` 四種設定
