@@ -1,14 +1,14 @@
-# ── Core inference ────────────────────────────────────────────────────────────
+# ── Phase 1: core inference ────────────────────────────────────────────────────
 numpy>=1.26
 ollama>=0.4
 pyyaml>=6.0
 
-# ── Phase 2: vector DB + chunking ─────────────────────────────────────────────
-chromadb>=0.5
-faiss-cpu>=1.8
+# ── Phase 2/3: vector DB ───────────────────────────────────────────────────────
+psycopg2-binary>=2.9
+pgvector>=0.3
 tiktoken>=0.7
 
-# ── Phase 4: ML defense classifier ────────────────────────────────────────────
+# ── Defense classifier ─────────────────────────────────────────────────────────
 xgboost>=2.0
 scikit-learn>=1.4
 

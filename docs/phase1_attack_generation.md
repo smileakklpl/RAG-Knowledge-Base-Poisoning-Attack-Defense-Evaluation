@@ -165,18 +165,110 @@
 
 ## 程式碼對應
 
-實際程式結構（已實作）：
+### 檔案結構
 
 ```
 src/
-├── clients.py                  # Ollama LLM + Embedding 客戶端
-├── config.py                   # ExperimentConfig (YAML)
-├── base.py                     # EvalResult / BaseEvaluator
+├── clients.py                  # LLMClient / EmbeddingClient（Ollama REST 封裝）
+├── config.py                   # ExperimentConfig（from_yaml 載入 YAML）
+├── base.py                     # EvalResult dataclass / BaseEvaluator ABC
 └── pipeline/
-    └── phase1.py               # Orchestrator + GeneratorAgent + 三個 Evaluator
+    └── phase1.py               # 全部 Phase 1 邏輯
+
+src/prompts/
+├── hijack.md                   # Hijack 攻擊的 Generator prompt 模板
+├── blocker.md                  # Blocker 攻擊的 Generator prompt 模板
+└── stealth.md                  # Stealth 攻擊的 Generator prompt 模板
+
+data/
+└── queries.json                # Target Query 集（含 malicious_payload + trigger_keywords）
+
+smoke_test.py                   # 1 query × 1 iter 快速驗證入口
 ```
 
-`smoke_test.py` 為 1 query × 1 iter 的快速驗證入口。
+### 主要類別與職責
+
+| 類別 | 檔案 | 職責 |
+|------|------|------|
+| `LLMClient` | `clients.py` | 封裝 `ollama.chat()`，支援 system prompt |
+| `EmbeddingClient` | `clients.py` | 封裝 `ollama.embed()`，提供 `cosine_similarity()` |
+| `ExperimentConfig` | `config.py` | 讀取 `configs/*.yaml`；`from_yaml` 只取 dataclass 已知欄位，忽略 Phase 2–5 的設定鍵 |
+| `EvalResult` | `base.py` | `score / feedback / passed` 三欄 dataclass |
+| `BaseEvaluator` | `base.py` | 定義 `evaluate()` 介面；子類別呼叫 `_result()` 產生 `EvalResult` |
+| `GeneratorAgent` | `phase1.py` | 載入 `src/prompts/{attack_type}.md`，格式化後呼叫 attacker LLM |
+| `SemanticAlignmentAgent` | `phase1.py` | Embedding cosine similarity；不呼叫 LLM |
+| `StealthEvaluatorAgent` | `phase1.py` | 四維統計懲罰分；不呼叫 LLM |
+| `PayloadVerifierAgent` | `phase1.py` | 呼叫 attacker LLM 評估指令強度；解析 JSON 回應 |
+| `Phase1Generator` | `phase1.py` | 迭代 Orchestrator；`generate_one()` / `run_batch()` / `save()` |
+| `PoisonChunk` | `phase1.py` | 輸出單筆 Poisoned Chunk 的 dataclass，欄位對應輸出 metadata 規範 |
+
+### ExperimentConfig 欄位（Phase 1 相關）
+
+```python
+attacker_model:    str          # Ollama 模型名稱，e.g. "gemma4:e4b"
+embedding_model:   str          # Ollama Embedding 模型，e.g. "bge-m3"
+max_iter:          int  = 4     # 每筆 query 的最大迭代次數
+sim_threshold:     float = 0.75 # SemanticAlignmentAgent 通過門檻
+stealth_threshold: float = 0.60 # StealthEvaluatorAgent 通過門檻
+payload_threshold: float = 0.70 # PayloadVerifierAgent 通過門檻
+```
+
+> Phase 2–5 所需的 `vector_db`、`datasets`、`defense` 等 YAML 鍵，`from_yaml` 會自動忽略（不傳入 dataclass），不影響 Phase 1 執行。
+
+### Prompt 模板格式
+
+三個 `src/prompts/*.md` 模板共用相同的四個格式化變數：
+
+| 變數 | 來源 |
+|------|------|
+| `{target_query}` | `queries.json` 的 `text` 欄位 |
+| `{malicious_payload}` | `queries.json` 的 `malicious_payload` 欄位 |
+| `{clean_sample}` | 由呼叫端（`smoke_test.py` 或批次腳本）提供的 CUAD 合約片段 |
+| `{feedback_section}` | 前一輪迭代失敗時的合併反饋；第一輪為空字串 |
+
+### StealthEvaluatorAgent 四維懲罰
+
+| 維度 | 觸發條件 | 懲罰 |
+|------|---------|------|
+| 指令語氣詞密度 | `kw_count / word_count > 0.02` | −0.30 |
+| 特殊字元比例 | `special_chars / len(chunk) > 0.01` | −0.20 |
+| 轉折標記偵測 | 任一 `_TRANSITION_MARKERS` 出現 | −0.30 |
+| 關鍵詞後段集中 | 後半 kw 數 > 前半 × 2 且後半 > 0 | −0.20 |
+
+`stealth_score = max(0.0, 1.0 - total_penalty)`
+
+### 執行方式
+
+**快速驗證（smoke test）**
+
+```bash
+# 預設：q01 × hijack × 1 iter
+python smoke_test.py
+
+# 指定參數
+python smoke_test.py --query-id q03 --attack-type stealth --max-iter 2
+```
+
+輸出存至 `output/smoke_test_result.json`。
+
+**批次生成**
+
+```python
+from src.config import ExperimentConfig
+from src.pipeline.phase1 import Phase1Generator
+import json
+
+config    = ExperimentConfig.from_yaml("configs/experiment_01.yaml")
+queries   = json.load(open("data/queries.json"))
+generator = Phase1Generator(config)
+
+chunks = generator.run_batch(
+    queries=queries,
+    clean_sample="<CUAD contract excerpt>",
+    attack_types=["hijack", "blocker", "stealth"],
+)
+generator.save(chunks, "output/poison_chunks.json")
+```
 
 ---
 
