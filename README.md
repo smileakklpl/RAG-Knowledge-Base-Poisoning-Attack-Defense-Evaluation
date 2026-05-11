@@ -28,21 +28,33 @@ pip install -r requirements.txt
 
 ### 啟動 Postgres + pgvector
 ```bash
-# 以 Docker 為例
-docker run -d --name rag-pgvector \
-  -e POSTGRES_PASSWORD=postgres \
-  -p 5432:5432 \
-  pgvector/pgvector:pg16
+# 使用 Docker Compose（schema 自動初始化）
+docker compose up -d
 
-# 建立資料庫並啟用擴充
-psql -h localhost -U postgres -c "CREATE DATABASE rag_poison;"
-psql -h localhost -U postgres -d rag_poison -c "CREATE EXTENSION vector;"
+# 確認 pgvector extension 已載入
+docker exec -it rag_poison_db psql -U postgres -d rag_poison -c "\dx"
 ```
 
-### 執行 Phase 1 煙霧測試
+### 執行管線
+```bash
+# 完整五階段
+python main.py
+
+# 單獨執行 Phase 1
+python main.py --phase 1
+
+# 從 Phase 3 繼續（前兩階已完成）
+python main.py --from-phase 3
+
+# 強制重跑（無視既有輸出）
+python main.py --force
+```
+
+### Phase 1 快速驗證（單筆）
 ```bash
 # 確保 Ollama 已運行且已拉取模型: gemma4:e4b, gemma4:31b, bge-m3
-python smoke_test.py
+python scripts/smoke_test.py
+python scripts/smoke_test.py --query-id q02 --attack-type stealth
 ```
 
 ### 核心配置
@@ -154,21 +166,36 @@ seed: 42                           # 隨機種子
 ## 專案結構
 
 ```
+main.py                             # 五階段管線主入口（--phase / --from-phase / --force）
+
 configs/
-├── experiment_01.yaml              # 模型、向量庫、防禦、評估模式設定
+└── experiment_01.yaml              # 模型、向量庫、防禦、評估模式設定
 
 data/
-├── queries.json                    # 規範查詢集（Phase 1、3、5 共用）
+└── queries.json                    # 規範查詢集（Phase 1、3、5 共用）
+
+db/
+└── init.sql                        # pgvector schema（Docker 啟動時自動執行）
+
+docker-compose.yml                  # PostgreSQL + pgvector 容器設定
 
 src/
 ├── config.py                       # ExperimentConfig 配置類
 ├── clients.py                      # LLMClient、EmbeddingClient（Ollama 0.4+ API）
 ├── base.py                         # BaseEvaluator、EvalResult 基類
-└── pipeline/
-    ├── __init__.py
-    └── phase1.py                   # 攻擊生成：GeneratorAgent + 三個評估器
+├── pipeline/
+│   ├── phase1.py                   # 攻擊生成：GeneratorAgent + 三個評估器（已完成）
+│   ├── phase2.py                   # 入庫 + 防禦點 A（stub）
+│   ├── phase3.py                   # 檢索 + 防禦點 B（stub）
+│   └── phase4.py                   # 目標 LLM 生成（stub）
+└── defense/
+    └── filter.py                   # DefenseFilter：特徵 + XGBoost（stub）
 
-smoke_test.py                       # Phase 1 快速測試（1 筆查詢、1 輪迭代）
+tools/
+└── annotate.py                     # Phase 5 人工標註 CLI 工具
+
+scripts/
+└── smoke_test.py                   # Phase 1 快速驗證（1 筆查詢、1 輪迭代）
 
 docs/
 ├── project_background.md           # 研究背景、文獻綜述、技術選型
@@ -201,7 +228,7 @@ docs/
 - **LLM 推論**：Ollama（統一接口）
 - **嵌入模型**：bge-m3（語義向量化）
 - **向量資料庫**：Postgres + pgvector（HNSW / IVFFlat 索引）
-- **防禦分類**：方法論待定（候選：特徵 + XGBoost，見 `docs/defense_methodology.md`）
+- **防禦分類**：PPL Filtering（GPT-2 global PPL + sliding window spike，見 `docs/defense_methodology.md`）
 - **評估方式**：人工 JSON 標註（無 Judge LLM）
 - **執行框架**：原生 Python + Ollama SDK 0.4+
 
@@ -241,32 +268,31 @@ docs/
 ## 開發進度
 
 ### 已完成
-- [x] **Phase 1** — 攻擊文本生成（含迭代最佳化）
+- [x] **管線骨架** — `main.py` 五階段 Orchestrator（`--phase` / `--from-phase` / `--force`）
+- [x] **Docker 環境** — `docker-compose.yml` + `db/init.sql`（pgvector schema 自動初始化）
+- [x] **Phase 1** — 攻擊文本生成（含迭代最佳化，smoke test 驗證通過）
   - GeneratorAgent（使用 LLM 生成候選中毒文本）
   - 三種攻擊類型評估器（Hijack、Blocker、Stealth）
   - 自動迭代改進機制
-  - 煙霧測試工具 `smoke_test.py`
+  - 快速驗證工具 `scripts/smoke_test.py`
+- [x] **Phase 5 標註工具** — `tools/annotate.py` 互動式 CLI（支援暫停續標）
 
 ### 進行中 / 規劃中
-- [ ] **Phase 2** — 入庫 + 防禦點 A
+- [ ] **Phase 1 批次執行** — `python main.py --phase 1` 跑完全部 15 組（5 queries × 3 attack_types）
+
+- [ ] **Phase 2** — 入庫 + 防禦點 A（`src/pipeline/phase2.py` stub 待實作）
   - CUAD 語料庫分塊與清洗
-  - bge-m3 向量化
-  - pgvector 索引構建（HNSW / IVFFlat）
-  - 入庫前防禦器（方法論待定，物理 DELETE 拒絕注入）
+  - bge-m3 向量化寫入 pgvector
+  - 入庫前防禦器 `src/defense/filter.py`（物理 DELETE 拒絕注入）
 
-- [ ] **Phase 3** — 檢索 + 防禦點 B
-  - 查詢觸發機制（基於 `trigger_keywords`）
+- [ ] **Phase 3** — 檢索 + 防禦點 B（`src/pipeline/phase3.py` stub 待實作）
   - Top-K 檢索與 RSR 計算
-  - 檢索後防禦器（方法論待定，標記 + 物理 DELETE + 剩餘乾淨 chunk 進 context）
+  - 檢索後防禦器（標記 + 物理 DELETE + 剩餘乾淨 chunk 進 context）
 
-- [ ] **Phase 4** — 目標 LLM 生成回答
-  - Sanitized context 注入 prompt
-  - Target LLM 批次生成
+- [ ] **Phase 4** — 目標 LLM 生成回答（`src/pipeline/phase4.py` stub 待實作）
+  - Sanitized context 注入 prompt（v1.0 固定版本）
+  - Target LLM 批次生成，記錄 latency_ms
 
-- [ ] **Phase 5** — 人工評估
-  - 輸出 JSON 表單（含 `attack_success` 待標註欄位）
-  - 人工標註後計算 ASR
-
-- [ ] **防禦方法論** — 雙防禦點共用偵測模型
-  - 候選方案：特徵 + XGBoost（待替換）
-  - 詳細規範待補
+- [x] **防禦方法論** — `src/defense/filter.py` PPL Filtering 實作完成
+  - GPT-2 small（HuggingFace）計算 global PPL + sliding window spike
+  - 文獻：RAGuard (IEEE BigData 2025)、Alon & Kamfonas (arXiv 2308.14132)

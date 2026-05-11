@@ -8,9 +8,10 @@ psycopg2-binary>=2.9
 pgvector>=0.3
 tiktoken>=0.7
 
-# ── Defense classifier ─────────────────────────────────────────────────────────
-xgboost>=2.0
-scikit-learn>=1.4
+# ── Defense classifier (PPL Filtering) ────────────────────────────────────────
+# CPU-only PyTorch: pip install torch --index-url https://download.pytorch.org/whl/cpu
+torch>=2.2
+transformers>=4.40
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
 tqdm>=4.66
