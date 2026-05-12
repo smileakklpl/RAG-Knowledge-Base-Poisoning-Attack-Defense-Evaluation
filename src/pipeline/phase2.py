@@ -100,7 +100,7 @@ class Phase2Injector:
         _write_jsonl(Path(output_audit_path), records)
         print(f"[Phase2] Audit log → {output_audit_path}  ({len(records)} records)")
 
-        report_path = Path(output_audit_path).parent / "phase2_report.md"
+        report_path = Path(output_audit_path).parent / "report.md"
         _write_report(report_path, records, inserted, blocked, self.config)
         print(f"[Phase2] Report    → {report_path}")
 

@@ -82,11 +82,11 @@ seed: 42                           # 隨機種子
 
 | 階段 | 目的 | 輸入 | 輸出 |
 |------|------|------|------|
-| **Phase 1** | 攻擊文本生成<br/>（三種攻擊類型） | `data/queries.json`<br/>+ 清淨合約樣本 | `output/poison_chunks.json`<br/>（含 `trigger_keywords`） |
-| **Phase 2** | 入庫 + **防禦點 A**<br/>（入庫前過濾） | CUAD + Phase 1 輸出 | pgvector 資料表<br/>（惡意文本被 DELETE） |
-| **Phase 3** | 檢索 + **防禦點 B**<br/>（檢索後過濾） | 查詢集 + 向量庫 | Sanitized Top-K<br/>（命中惡意 → 標記 + 物理 DELETE） |
-| **Phase 4** | 目標 LLM 生成回答 | Sanitized Context | LLM 回答（JSON 落盤） |
-| **Phase 5** | 人工評估 | Phase 4 輸出 JSON | 人工填 `attack_success`，計算 ASR |
+| **Phase 1** | 攻擊文本生成<br/>（三種攻擊類型） | `data/queries.json`<br/>+ 清淨合約樣本 | `output/phase1/poison_chunks.json` |
+| **Phase 2** | 入庫 + **防禦點 A**<br/>（入庫前過濾） | CUAD + Phase 1 輸出 | pgvector 資料表<br/>`output/phase2/audit_defense_a.jsonl` |
+| **Phase 3** | 檢索 + **防禦點 B**<br/>（檢索後過濾） | 查詢集 + 向量庫 | `output/phase3/retrieval_results.json`<br/>`output/phase3/audit_defense_b.jsonl` |
+| **Phase 4** | 目標 LLM 生成回答 | Sanitized Context | `output/phase4/phase4_results.json` |
+| **Phase 5** | 人工評估 | Phase 4 輸出 JSON | `output/phase5/phase5_annotated.json` |
 
 ---
 
@@ -184,9 +184,9 @@ src/
 ├── clients.py                      # LLMClient、EmbeddingClient（Ollama 0.4+ API）
 ├── base.py                         # BaseEvaluator、EvalResult 基類
 ├── pipeline/
-│   ├── phase1.py                   # 攻擊生成：GeneratorAgent + 三個評估器（已完成）
+│   ├── phase1.py                   # 攻擊生成（已完成）
 │   ├── phase2.py                   # 入庫 + 防禦點 A（已實作）
-│   ├── phase3.py                   # 檢索 + 防禦點 B（stub）
+│   ├── phase3.py                   # 檢索 + 防禦點 B（已實作）
 │   └── phase4.py                   # 目標 LLM 生成（stub）
 └── defense/
     └── filter.py                   # PPLDefenseFilter：GPT-2 global PPL + window spike（已實作）
@@ -197,16 +197,24 @@ tools/
 scripts/
 └── smoke_test.py                   # Phase 1 快速驗證（1 筆查詢、1 輪迭代）
 
+output/                             # 實驗輸出（gitignored，按 phase 分層）
+├── phase1/   poison_chunks.json
+├── phase2/   audit_defense_a.jsonl + report.md
+├── phase3/   retrieval_results.json + audit_defense_b.jsonl + report.md
+├── phase4/   phase4_results.json（待實作）
+├── phase5/   phase5_annotated.json（待實作）
+└── tests/    smoke_test_result.json
+
 docs/
-├── project_background.md           # 研究背景、文獻綜述、技術選型
-├── development_implementation_guide.md  # 工程策略、硬體配置、開發順序
-├── experiment_flow_diagram.md      # 實驗流程與指標關係圖
-├── phase1_attack_generation.md     # Phase 1 攻擊生成
-├── phase2_injection_indexing.md    # Phase 2 入庫 + 防禦點 A
-├── phase3_trigger_retrieval.md     # Phase 3 檢索 + 防禦點 B
-├── phase4_target_generation.md     # Phase 4 目標 LLM 生成回答
-├── phase5_human_evaluation.md      # Phase 5 人工評估
-└── defense_methodology.md          # 防禦方法論候選方案（共用於兩個防禦點）
+├── project_background.md
+├── development_implementation_guide.md
+├── experiment_flow_diagram.md
+├── phase1_attack_generation.md
+├── phase2_injection_indexing.md
+├── phase3_trigger_retrieval.md
+├── phase4_target_generation.md
+├── phase5_human_evaluation.md
+└── defense_methodology.md
 ```
 
 ---
@@ -253,7 +261,7 @@ docs/
    - 對 `data/queries.json` 每筆查詢做 Top-K 檢索
    - 記錄 RSR（中毒文本是否被檢索到）
    - 執行 Defense B（post_retrieval）→ 命中惡意 → 物理 DELETE + 從 context 移除
-   - 輸出 `output/retrieval_results.json` + `output/audit_defense_b.jsonl`
+   - 輸出 `output/phase3/retrieval_results.json` + `output/phase3/audit_defense_b.jsonl`
 
 ---
 
@@ -270,11 +278,12 @@ docs/
 - [x] **Phase 5 標註工具** — `tools/annotate.py` 互動式 CLI（支援暫停續標）
 
 ### 進行中 / 規劃中
-- [ ] **Phase 2 執行** — `python main.py --phase 2`（需 Docker + Ollama bge-m3 就緒）
 
-- [ ] **Phase 3** — 檢索 + 防禦點 B（`src/pipeline/phase3.py` stub 待實作）
-  - Top-K 檢索與 RSR 計算
-  - 檢索後防禦器（標記 + 物理 DELETE + 剩餘乾淨 chunk 進 context）
+- [x] **Phase 3** — `src/pipeline/phase3.py` 實作完成，執行驗證通過（31s）
+  - bge-m3 embed query → pgvector cosine top-k，跑三個 k 值（3/5/10）
+  - Defense Filter B（PPL，寬鬆閾值）→ 物理 DELETE 惡意 chunk
+  - 輸出 `output/phase3/retrieval_results.json` + `output/phase3/audit_defense_b.jsonl` + `output/phase3/report.md`
+  - 測試結果：RSR=100%（所有查詢命中 poison chunk），DBR-B=0%（PPL 未攔截，符合預期）
 
 - [ ] **Phase 4** — 目標 LLM 生成回答（`src/pipeline/phase4.py` stub 待實作）
   - Sanitized context 注入 prompt（v1.0 固定版本）

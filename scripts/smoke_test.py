@@ -19,7 +19,7 @@ from src.pipeline.phase1 import Phase1Generator
 
 CONFIG_PATH = "configs/experiment_01.yaml"
 QUERIES_PATH = "data/queries.json"
-OUTPUT_PATH = "output/smoke_test_result.json"
+OUTPUT_PATH = "output/tests/smoke_test_result.json"
 
 CLEAN_SAMPLE = """\
 This Agreement shall commence on the Effective Date and continue for an initial term \

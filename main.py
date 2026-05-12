@@ -29,11 +29,11 @@ QUERIES_PATH = "data/queries.json"
 
 # 各 Phase 的主要輸出檔案，用於判斷是否已完成
 PHASE_OUTPUTS = {
-    1: Path("output/poison_chunks.json"),
-    2: Path("output/audit_defense_a.jsonl"),
-    3: Path("output/retrieval_results.json"),
-    4: Path("output/phase4_results.json"),
-    5: Path("output/phase5_annotated.json"),
+    1: Path("output/phase1/poison_chunks.json"),
+    2: Path("output/phase2/audit_defense_a.jsonl"),
+    3: Path("output/phase3/retrieval_results.json"),
+    4: Path("output/phase4/phase4_results.json"),
+    5: Path("output/phase5/phase5_annotated.json"),
 }
 
 PHASE_NAMES = {
@@ -111,7 +111,7 @@ def run_phase3(config: ExperimentConfig) -> None:
     retriever.run(
         queries_path=QUERIES_PATH,
         output_results_path=str(PHASE_OUTPUTS[3]),
-        output_audit_path="output/audit_defense_b.jsonl",
+        output_audit_path="output/phase3/audit_defense_b.jsonl",
     )
 
 

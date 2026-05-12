@@ -29,5 +29,10 @@ env/
 .DS_Store
 Thumbs.db
 
-# ── 實驗輸出 ─────────────────────────────────────────────────
-#output/
+# ── 實驗輸出（按 phase 分層）────────────────────────────────
+#output/phase1/
+#output/phase2/
+#output/phase3/
+#output/phase4/
+#output/phase5/
+#output/tests/
