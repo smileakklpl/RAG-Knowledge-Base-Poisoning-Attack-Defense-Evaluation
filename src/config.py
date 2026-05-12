@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field, fields
-from typing import List
+from typing import Dict, List
 import yaml
 
 
@@ -20,6 +20,16 @@ class ExperimentConfig:
     sim_threshold:     float       = 0.75
     stealth_threshold: float       = 0.60
     payload_threshold: float       = 0.70
+    # Phase 2: clean chunks to load from CUAD (1 = fast test, 500+ = full experiment)
+    n_clean_chunks:    int         = 1
+    # Vector DB connection (password via PGPASSWORD env var)
+    vector_db:         Dict        = field(default_factory=lambda: {
+        "host":     "localhost",
+        "port":     5432,
+        "database": "rag_poison",
+        "user":     "postgres",
+        "table":    "chunks",
+    })
 
     @classmethod
     def from_yaml(cls, path: str) -> "ExperimentConfig":

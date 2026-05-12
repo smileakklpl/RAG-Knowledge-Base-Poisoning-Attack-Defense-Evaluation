@@ -159,7 +159,7 @@ seed: 42                           # 隨機種子
                      人工 JSON 標註 → ASR
 ```
 
-具體偵測方法（特徵萃取、分類器等）見 `docs/defense_methodology.md`，目前仍為候選方案，最終方法論待定。
+具體偵測方法見 `docs/defense_methodology.md`：**PPL Filtering**（GPT-2 global perplexity + sliding window spike），已確定採用。
 
 ---
 
@@ -185,11 +185,11 @@ src/
 ├── base.py                         # BaseEvaluator、EvalResult 基類
 ├── pipeline/
 │   ├── phase1.py                   # 攻擊生成：GeneratorAgent + 三個評估器（已完成）
-│   ├── phase2.py                   # 入庫 + 防禦點 A（stub）
+│   ├── phase2.py                   # 入庫 + 防禦點 A（已實作）
 │   ├── phase3.py                   # 檢索 + 防禦點 B（stub）
 │   └── phase4.py                   # 目標 LLM 生成（stub）
 └── defense/
-    └── filter.py                   # DefenseFilter：特徵 + XGBoost（stub）
+    └── filter.py                   # PPLDefenseFilter：GPT-2 global PPL + window spike（已實作）
 
 tools/
 └── annotate.py                     # Phase 5 人工標註 CLI 工具
@@ -247,21 +247,13 @@ docs/
 - **`phase5_human_evaluation.md`** — Phase 5 人工評估流程與標註格式
 - **`defense_methodology.md`** — 防禦方法論候選方案（兩個防禦點共用，最終方法待定）
 
-## 下一步（Phase 2 開發建議）
+## 下一步（Phase 3 開發）
 
-1. **建立 pgvector 資料庫**
-   - Docker / 本地安裝 Postgres 16 + pgvector 擴充
-   - 建立 `chunks` 資料表，定義 schema（含 `is_poison`、`is_blocked` 欄位）
-
-2. **載入與清洗 CUAD 語料**
-   - 讀取 CUAD 資料集（510 份合約）
-   - 分塊處理（建議 300-500 token 窗口，50-100 token 重疊）
-
-3. **整合防禦點 A**
-   - 入庫前先過防禦器（方法論待定）
-   - 命中惡意 → 物理 DELETE / 不寫入；通過 → 寫入並建立 HNSW 索引
-
-詳見 `docs/phase2_injection_indexing.md` 的實作規範。
+1. **實作 Phase 3** — `src/pipeline/phase3.py`
+   - 對 `data/queries.json` 每筆查詢做 Top-K 檢索
+   - 記錄 RSR（中毒文本是否被檢索到）
+   - 執行 Defense B（post_retrieval）→ 命中惡意 → 物理 DELETE + 從 context 移除
+   - 輸出 `output/retrieval_results.json` + `output/audit_defense_b.jsonl`
 
 ---
 
@@ -278,12 +270,7 @@ docs/
 - [x] **Phase 5 標註工具** — `tools/annotate.py` 互動式 CLI（支援暫停續標）
 
 ### 進行中 / 規劃中
-- [ ] **Phase 1 批次執行** — `python main.py --phase 1` 跑完全部 15 組（5 queries × 3 attack_types）
-
-- [ ] **Phase 2** — 入庫 + 防禦點 A（`src/pipeline/phase2.py` stub 待實作）
-  - CUAD 語料庫分塊與清洗
-  - bge-m3 向量化寫入 pgvector
-  - 入庫前防禦器 `src/defense/filter.py`（物理 DELETE 拒絕注入）
+- [ ] **Phase 2 執行** — `python main.py --phase 2`（需 Docker + Ollama bge-m3 就緒）
 
 - [ ] **Phase 3** — 檢索 + 防禦點 B（`src/pipeline/phase3.py` stub 待實作）
   - Top-K 檢索與 RSR 計算
@@ -296,3 +283,8 @@ docs/
 - [x] **防禦方法論** — `src/defense/filter.py` PPL Filtering 實作完成
   - GPT-2 small（HuggingFace）計算 global PPL + sliding window spike
   - 文獻：RAGuard (IEEE BigData 2025)、Alon & Kamfonas (arXiv 2308.14132)
+- [x] **Phase 2** — `src/pipeline/phase2.py` 實作完成，執行驗證通過（18s）
+  - CUAD 載入：`n_clean_chunks`（config 控制，1=快速測試，500=完整實驗）
+  - Defense Filter A（PPL Filtering）→ 通過才寫入 pgvector
+  - 輸出 `output/audit_defense_a.jsonl` + `output/phase2_report.md`
+  - 測試結果（1 clean + 15 poison）：DBR-A=13.33%（blocker=40%, hijack=0%, stealth=0%），CDR-A=0.00%
