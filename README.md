@@ -52,16 +52,26 @@ python main.py --force
 
 ### Phase 1 快速驗證（單筆）
 ```bash
-# 確保 Ollama 已運行且已拉取模型: gemma4:e4b, gemma4:31b, bge-m3
+# 確保 Ollama 已運行且已拉取模型: gemma4:e4b, gemma4:26b, bge-m3
 python scripts/smoke_test.py
 python scripts/smoke_test.py --query-id q02 --attack-type stealth
+```
+
+### Phase 5 人工標註
+```bash
+# 獨立執行標註工具（可在 Phase 4 完成後隨時執行）
+python tools/annotate.py
+python tools/annotate.py --annotator WL
+
+# 或透過主管線
+python main.py --phase 5
 ```
 
 ### 核心配置
 編輯 `configs/experiment_01.yaml`：
 ```yaml
 attacker_model:  "gemma4:e4b"      # 攻擊者 LLM（生成中毒文本）
-target_model:    "gemma4:31b"      # 目標 LLM（檢索中毒文本並回答）
+target_model:    "gemma4:26b"      # 目標 LLM（檢索中毒文本並回答）
 embedding_model: "bge-m3"          # 語義編碼器（向量化文本）
 
 evaluation_mode: "human"           # 人工 JSON 標註，不再使用 Judge LLM
@@ -186,8 +196,8 @@ src/
 ├── pipeline/
 │   ├── phase1.py                   # 攻擊生成（已完成）
 │   ├── phase2.py                   # 入庫 + 防禦點 A（已實作）
-│   ├── phase3.py                   # 檢索 + 防禦點 B（已實作）
-│   └── phase4.py                   # 目標 LLM 生成（stub）
+│   ├── phase3.py                   # 檢索 + 防禦點 B（已完成）
+│   └── phase4.py                   # 目標 LLM 生成（已完成）
 └── defense/
     └── filter.py                   # PPLDefenseFilter：GPT-2 global PPL + window spike（已實作）
 
@@ -201,8 +211,8 @@ output/                             # 實驗輸出（gitignored，按 phase 分�
 ├── phase1/   poison_chunks.json
 ├── phase2/   audit_defense_a.jsonl + report.md
 ├── phase3/   retrieval_results.json + audit_defense_b.jsonl + report.md
-├── phase4/   phase4_results.json（待實作）
-├── phase5/   phase5_annotated.json（待實作）
+├── phase4/   phase4_results.json + report.md
+├── phase5/   phase5_annotated.json + report.md（標註完成後產生）
 └── tests/    smoke_test_result.json
 
 docs/
@@ -255,45 +265,38 @@ docs/
 - **`phase5_human_evaluation.md`** — Phase 5 人工評估流程與標註格式
 - **`defense_methodology.md`** — 防禦方法論候選方案（兩個防禦點共用，最終方法待定）
 
-## 下一步（Phase 3 開發）
-
-1. **實作 Phase 3** — `src/pipeline/phase3.py`
-   - 對 `data/queries.json` 每筆查詢做 Top-K 檢索
-   - 記錄 RSR（中毒文本是否被檢索到）
-   - 執行 Defense B（post_retrieval）→ 命中惡意 → 物理 DELETE + 從 context 移除
-   - 輸出 `output/phase3/retrieval_results.json` + `output/phase3/audit_defense_b.jsonl`
-
 ---
 
 ## 開發進度
 
 ### 已完成
+
 - [x] **管線骨架** — `main.py` 五階段 Orchestrator（`--phase` / `--from-phase` / `--force`）
 - [x] **Docker 環境** — `docker-compose.yml` + `db/init.sql`（pgvector schema 自動初始化）
-- [x] **Phase 1** — 攻擊文本生成（含迭代最佳化，smoke test 驗證通過）
-  - GeneratorAgent（使用 LLM 生成候選中毒文本）
-  - 三種攻擊類型評估器（Hijack、Blocker、Stealth）
-  - 自動迭代改進機制
-  - 快速驗證工具 `scripts/smoke_test.py`
-- [x] **Phase 5 標註工具** — `tools/annotate.py` 互動式 CLI（支援暫停續標）
-
-### 進行中 / 規劃中
-
-- [x] **Phase 3** — `src/pipeline/phase3.py` 實作完成，執行驗證通過（31s）
-  - bge-m3 embed query → pgvector cosine top-k，跑三個 k 值（3/5/10）
-  - Defense Filter B（PPL，寬鬆閾值）→ 物理 DELETE 惡意 chunk
-  - 輸出 `output/phase3/retrieval_results.json` + `output/phase3/audit_defense_b.jsonl` + `output/phase3/report.md`
-  - 測試結果：RSR=100%（所有查詢命中 poison chunk），DBR-B=0%（PPL 未攔截，符合預期）
-
-- [ ] **Phase 4** — 目標 LLM 生成回答（`src/pipeline/phase4.py` stub 待實作）
-  - Sanitized context 注入 prompt（v1.0 固定版本）
-  - Target LLM 批次生成，記錄 latency_ms
-
 - [x] **防禦方法論** — `src/defense/filter.py` PPL Filtering 實作完成
   - GPT-2 small（HuggingFace）計算 global PPL + sliding window spike
   - 文獻：RAGuard (IEEE BigData 2025)、Alon & Kamfonas (arXiv 2308.14132)
+- [x] **Phase 1** — 攻擊文本生成（含迭代最佳化，smoke test 驗證通過）
+  - 三種攻擊類型：Hijack / Blocker / Stealth
+  - GeneratorAgent + 評估器自動迭代改進
+  - 快速驗證工具 `scripts/smoke_test.py`
 - [x] **Phase 2** — `src/pipeline/phase2.py` 實作完成，執行驗證通過（18s）
   - CUAD 載入：`n_clean_chunks`（config 控制，1=快速測試，500=完整實驗）
-  - Defense Filter A（PPL Filtering）→ 通過才寫入 pgvector
-  - 輸出 `output/audit_defense_a.jsonl` + `output/phase2_report.md`
+  - Defense Filter A（PPL，global=80 / spike=120）→ 通過才寫入 pgvector
   - 測試結果（1 clean + 15 poison）：DBR-A=13.33%（blocker=40%, hijack=0%, stealth=0%），CDR-A=0.00%
+- [x] **Phase 3** — `src/pipeline/phase3.py` 實作完成，執行驗證通過（31s）
+  - bge-m3 embed query → pgvector cosine top-k，跑三個 k 值（3/5/10）
+  - Defense Filter B（PPL，global=100 / spike=150）→ 物理 DELETE 惡意 chunk
+  - 測試結果：RSR=100%（所有查詢命中 poison chunk），DBR-B=0%（PPL 對本實驗完全無效，符合文獻預期）
+- [x] **Phase 4** — `src/pipeline/phase4.py` 實作完成，執行驗證通過（~23min）
+  - Sanitized context + RAG prompt v1.0 → `gemma4:26b` 批次生成
+  - 15 筆 entry（5 queries × 3 k 值），全部含毒化 context（防禦無效所致）
+  - 初步觀察：q02（適用法律）完全中毒，q01（終止天數）部分中毒
+- [x] **Phase 5 標註工具** — `tools/annotate.py` 互動式 CLI（支援暫停續標）
+  - 逐筆顯示 query / model_answer / malicious_payload
+  - 填寫 `is_poisoned_answer`、`match_level`、`annotator_note`
+  - 全部標完後自動產生 `output/phase5/report.md`（含 ASR、match level 分佈）
+
+### 待完成
+
+- [ ] **Phase 5 人工標註執行** — 執行 `python main.py --phase 5` 完成 15 筆標註
