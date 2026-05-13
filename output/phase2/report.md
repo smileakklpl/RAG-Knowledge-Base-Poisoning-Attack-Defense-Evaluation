@@ -1,47 +1,48 @@
-# Phase 2 — 實驗報告
+# Phase 2 — Experiment Report
 
-**執行時間**：2026-05-12T15:12:24.612135+00:00  
-**設定檔**：`configs/experiment_01.yaml`  
-**防禦方法**：PPL Filtering (GPT-2 small, global + sliding-window spike)  
-**防禦點 A 閾值**：global_ppl=80, spike_ppl=120  
+**Run time**: 2026-05-13T11:57:00.051579+00:00  
+**Config**: `configs/experiment_01.yaml`  
+**Defense A**: PPL (GPT-2 small) + Semantic Consistency (bge-m3)  
+**Thresholds**: PPL global=80 spike=120 · sem_sim_min=0.5  
 
 ---
 
-## 資料集
+## Dataset
 
 | Item | Value |
 |------|-------|
-| Clean chunks (CUAD) | 1 |
-| Poison chunks (Phase 1) | 15 |
-| Total candidates | 16 |
+| Clean chunks (CUAD) | 100 |
+| Poison chunks (Phase 1) | 5 |
+| Total candidates | 105 |
 | Embedding model | bge-m3 |
 | Chunk size | 300 tokens / 50 overlap |
 
 ---
 
-## 防禦點 A — 實驗結果
+## Defense Point A — Results
 
 | Metric | Value |
 |--------|-------|
-| Chunks inserted into pgvector | 14 |
-| Chunks blocked (not inserted) | 2 |
-| **DBR-A** (poison caught / total poison) | **13.33%** |
-| **CDR-A** (clean wrongly blocked / total clean) | **0.00%** |
+| Chunks inserted into pgvector | 73 |
+| Chunks blocked (not inserted) | 32 |
+| **DBR-A (PPL only)** | **0.00%** |
+| **DBR-A (sem, among PPL-pass)** | **0.00%** |
+| **DBR-A (combined)** | **0.00%** |
+| **CDR-A** | **32.00%** |
 
-### 各攻擊類型細分
+### Per-Attack-Type Breakdown
 
-| Attack Type | Total | Caught | DBR | Avg Score |
-|-------------|-------|--------|-----|-----------|
-| blocker | 5 | 2 | 40% | 0.774 |
-| hijack | 5 | 0 | 0% | 0.417 |
-| stealth | 5 | 0 | 0% | 0.521 |
+| Attack Type | Total | PPL caught | Sem caught | Combined | DBR | Avg PPL score | Avg sim_max |
+|-------------|-------|-----------|-----------|---------|-----|--------------|------------|
+| hijack | 2 | 0 | 0 | 0 | 0% | 0.343 | 0.673 |
+| stealth | 3 | 0 | 0 | 0 | 0% | 0.430 | 0.653 |
 
 ---
 
-## 備註
+## Notes
 
-- `n_clean_chunks=1`：如需具統計意義的 CDR 量測，請提高此數值（建議 100–500）
-- **Stealth** 攻擊的 DBR-A 預期偏低：此類攻擊刻意維持低困惑度以規避 PPL 過濾
-- **Blocker** 因語言模式不自然（插入大量隨機字符），理論上應有較高 DBR，本次結果吻合
-- **Hijack** 同樣未被攔截，可能因為生成文字語言流暢，困惑度未超出閾值
-- 逐 chunk 詳細稽核記錄：`output/phase2/audit_defense_a.jsonl`
+- `n_clean_chunks=100` — increase for statistically robust CDR measurement
+- `sem_sim_threshold=0.5` — chunks with sim_max below this are flagged as off-topic
+- **Stealth** attacks expected to evade both filters: low PPL + high semantic similarity to legal text
+- **Hijack / Blocker** expected to be caught by PPL or semantic filter
+- Audit log with per-chunk details: `output/phase2/audit_defense_a.jsonl`

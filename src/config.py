@@ -22,6 +22,8 @@ class ExperimentConfig:
     payload_threshold: float       = 0.70
     # Phase 2: clean chunks to load from CUAD (1 = fast test, 500+ = full experiment)
     n_clean_chunks:    int         = 1
+    # Phase 2: max poison chunks to inject (None = use all from Phase 1)
+    n_poison_chunks:   int         = None
     # Vector DB connection (password via PGPASSWORD env var)
     vector_db:         Dict        = field(default_factory=lambda: {
         "host":     "localhost",

@@ -127,7 +127,7 @@ def run_phase4(config: ExperimentConfig) -> None:
 
 
 def run_phase5(_config: ExperimentConfig) -> None:
-    from tools.annotate import run_annotation
+    from src.pipeline.phase5 import run_annotation
 
     run_annotation(
         input_path=str(PHASE_OUTPUTS[4]),
@@ -193,7 +193,7 @@ def main() -> None:
 
     for phase_num in phases_to_run:
         output = PHASE_OUTPUTS.get(phase_num)
-        if output and output.exists() and not args.force:
+        if output and output.exists() and not args.force and phase_num != 5:
             print(f"[SKIP]  {PHASE_NAMES[phase_num]}")
             print(f"        output already exists: {output}")
             print(f"        use --force to re-run\n")

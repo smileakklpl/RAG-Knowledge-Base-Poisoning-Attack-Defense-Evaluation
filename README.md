@@ -19,14 +19,29 @@
 
 ## 快速開始
 
-### 環境設置
+### 前置需求
+
+| 工具 | 用途 |
+|------|------|
+| Docker Desktop | 執行 PostgreSQL + pgvector |
+| Ollama | 本地 LLM 推論 |
+| Python 3.10+ | 管線執行環境 |
+
+### 1. 環境設置
 ```bash
 conda create -n ML_final python=3.10
 conda activate ML_final
 pip install -r requirements.txt
 ```
 
-### 啟動 Postgres + pgvector
+### 2. 拉取所需模型（Ollama）
+```bash
+ollama pull gemma4:e4b    # 攻擊者 LLM（Phase 1 生成毒化文本）
+ollama pull gemma4:26b    # 目標 LLM（Phase 4 模擬受害者）
+ollama pull bge-m3        # 嵌入模型（Phase 2/3 向量化）
+```
+
+### 3. 啟動 Postgres + pgvector
 ```bash
 # 使用 Docker Compose（schema 自動初始化）
 docker compose up -d
@@ -35,36 +50,38 @@ docker compose up -d
 docker exec -it rag_poison_db psql -U postgres -d rag_poison -c "\dx"
 ```
 
-### 執行管線
+### 4. 完整實驗流程
+
 ```bash
-# 完整五階段
+# ── 首次執行：完整五階段 ──────────────────────────────────
 python main.py
 
-# 單獨執行 Phase 1
-python main.py --phase 1
+# ── 單獨執行特定 Phase ────────────────────────────────────
+python main.py --phase 1          # 攻擊文本生成
+python main.py --phase 2          # 入庫 + 防禦點 A
+python main.py --phase 3          # 檢索 + 防禦點 B
+python main.py --phase 4          # 目標 LLM 生成回答
+python main.py --phase 5          # 人工標註（互動式）
 
-# 從 Phase 3 繼續（前兩階已完成）
+# ── 從指定 Phase 繼續（前面已跑完）───────────────────────
 python main.py --from-phase 3
 
-# 強制重跑（無視既有輸出）
-python main.py --force
+# ── 強制重跑（無視既有輸出）──────────────────────────────
+python main.py --phases 2 3 4 --force   # 重跑 Phase 2–4
+python main.py --force                  # 重跑全部
+
+# ── Phase 5 標註（可隨時繼續，進度自動儲存）──────────────
+python main.py --phase 5
+python tools/annotate.py --annotator WL
 ```
 
-### Phase 1 快速驗證（單筆）
+> **注意**：Phase 5 為互動式標註，不受 `--force` 影響，每次執行都會繼續未完成的標註。
+
+### 5. Phase 1 快速驗證（單筆）
 ```bash
-# 確保 Ollama 已運行且已拉取模型: gemma4:e4b, gemma4:26b, bge-m3
+# 確保 Ollama 已運行，驗證攻擊生成流程
 python scripts/smoke_test.py
 python scripts/smoke_test.py --query-id q02 --attack-type stealth
-```
-
-### Phase 5 人工標註
-```bash
-# 獨立執行標註工具（可在 Phase 4 完成後隨時執行）
-python tools/annotate.py
-python tools/annotate.py --annotator WL
-
-# 或透過主管線
-python main.py --phase 5
 ```
 
 ### 核心配置
@@ -74,15 +91,16 @@ attacker_model:  "gemma4:e4b"      # 攻擊者 LLM（生成中毒文本）
 target_model:    "gemma4:26b"      # 目標 LLM（檢索中毒文本並回答）
 embedding_model: "bge-m3"          # 語義編碼器（向量化文本）
 
-evaluation_mode: "human"           # 人工 JSON 標註，不再使用 Judge LLM
+evaluation_mode: "human"           # 人工 JSON 標註，不使用 Judge LLM
 
 vector_db:
-  backend:  "pgvector"             # Postgres + pgvector
+  backend:  "pgvector"
   host:     "localhost"
   database: "rag_poison"
 
-top_k: [3, 5, 10]                  # 檢索 top-k 候選
-poison_ratio: [0.01, 0.05, 0.10]   # 中毒比例（1%、5%、10%）
+top_k: [5]                         # 檢索 top-k 候選
+n_clean_chunks:  100               # Phase 2 載入的乾淨 CUAD 文件數（1=快速測試）
+n_poison_chunks: 5                 # Phase 2 注入的毒化文件數（null=全部使用）
 seed: 42                           # 隨機種子
 ```
 
@@ -197,12 +215,13 @@ src/
 │   ├── phase1.py                   # 攻擊生成（已完成）
 │   ├── phase2.py                   # 入庫 + 防禦點 A（已實作）
 │   ├── phase3.py                   # 檢索 + 防禦點 B（已完成）
-│   └── phase4.py                   # 目標 LLM 生成（已完成）
+│   ├── phase4.py                   # 目標 LLM 生成（已完成）
+│   └── phase5.py                   # 人工標註核心邏輯（已完成）
 └── defense/
     └── filter.py                   # PPLDefenseFilter：GPT-2 global PPL + window spike（已實作）
 
 tools/
-└── annotate.py                     # Phase 5 人工標註 CLI 工具
+└── annotate.py                     # Phase 5 CLI 入口（import src.pipeline.phase5）
 
 scripts/
 └── smoke_test.py                   # Phase 1 快速驗證（1 筆查詢、1 輪迭代）
@@ -292,11 +311,13 @@ docs/
   - Sanitized context + RAG prompt v1.0 → `gemma4:26b` 批次生成
   - 15 筆 entry（5 queries × 3 k 值），全部含毒化 context（防禦無效所致）
   - 初步觀察：q02（適用法律）完全中毒，q01（終止天數）部分中毒
-- [x] **Phase 5 標註工具** — `tools/annotate.py` 互動式 CLI（支援暫停續標）
-  - 逐筆顯示 query / model_answer / malicious_payload
+- [x] **Phase 5 標註工具** — `src/pipeline/phase5.py` 核心邏輯 + `tools/annotate.py` CLI 入口
+  - 逐筆顯示 query / 實際注入文字（Phase 1） / model_answer（Phase 4）
+  - 對照 Phase 3 retrieval 記錄，顯示每個 poison chunk 的攻擊類型與 rank
   - 填寫 `is_poisoned_answer`、`match_level`、`annotator_note`
-  - 全部標完後自動產生 `output/phase5/report.md`（含 ASR、match level 分佈）
+  - 支援 Ctrl-C 中途暫停，進度自動儲存；全部標完後自動產生 `output/phase5/report.md`
 
 ### 待完成
 
-- [ ] **Phase 5 人工標註執行** — 執行 `python main.py --phase 5` 完成 15 筆標註
+- [ ] **Phase 5 人工標註執行** — 執行 `python main.py --phase 5` 完成標註
+- [ ] **資料稀釋防禦實驗** — 設定 `n_clean_chunks=100 / n_poison_chunks=5`，執行 `python main.py --phases 2 3 4 --force`，與基準組（1 clean + 15 poison, ASR=100%）比較 ASR 變化

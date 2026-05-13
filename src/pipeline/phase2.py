@@ -57,7 +57,13 @@ class Phase2Injector:
 
         print("[Phase2] Loading Phase 1 poison chunks...")
         poison_chunks = self._load_poison_chunks(poison_chunks_path)
-        print(f"[Phase2] {len(poison_chunks)} poison chunks loaded.")
+        total_poison  = len(poison_chunks)
+        n_poison = getattr(self.config, "n_poison_chunks", None)
+        if n_poison is not None and n_poison < total_poison:
+            poison_chunks = rng.sample(poison_chunks, n_poison)
+            print(f"[Phase2] Sampled {n_poison} / {total_poison} poison chunks.")
+        else:
+            print(f"[Phase2] {total_poison} poison chunks loaded.")
 
         from src.defense.filter import PPLDefenseFilter
         defense_a = PPLDefenseFilter.from_config(self.config, "pre_injection")
