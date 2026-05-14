@@ -27,11 +27,6 @@ from tqdm import tqdm
 if TYPE_CHECKING:
     from src.config import ExperimentConfig
 
-_ENC_NAME      = "cl100k_base"
-_CHUNK_TOKENS  = 300
-_CHUNK_OVERLAP = 50
-
-
 class Phase2Injector:
     """
     Loads CUAD clean corpus + Phase 1 poison chunks, runs Defense A, writes to pgvector.
@@ -42,8 +37,12 @@ class Phase2Injector:
     """
 
     def __init__(self, config: "ExperimentConfig"):
-        self.config = config
-        self._enc   = tiktoken.get_encoding(_ENC_NAME)
+        self.config   = config
+        chunking      = getattr(config, "chunking", {}) or {}
+        self._enc_name      = chunking.get("tokenizer_encoding", "cl100k_base")
+        self._chunk_tokens  = chunking.get("chunk_size_tokens",  300)
+        self._chunk_overlap = chunking.get("overlap_tokens",     50)
+        self._enc     = tiktoken.get_encoding(self._enc_name)
 
     # ── Public entry point ────────────────────────────────────────────────────
 
@@ -146,7 +145,7 @@ class Phase2Injector:
         idx = 0
         start = 0
         while start < len(tokens):
-            end        = min(start + _CHUNK_TOKENS, len(tokens))
+            end        = min(start + self._chunk_tokens, len(tokens))
             chunk_text = self._enc.decode(tokens[start:end])
             if chunk_text.strip():
                 chunks.append({
@@ -159,7 +158,7 @@ class Phase2Injector:
                     "chunk_index": idx,
                 })
                 idx += 1
-            start += _CHUNK_TOKENS - _CHUNK_OVERLAP
+            start += self._chunk_tokens - self._chunk_overlap
         return chunks
 
     # ── Phase 1 poison loading ─────────────────────────────────────────────────

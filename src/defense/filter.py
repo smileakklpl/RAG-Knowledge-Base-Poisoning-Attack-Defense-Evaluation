@@ -133,18 +133,23 @@ class PPLDefenseFilter:
         return is_malicious, round(anomaly_score, 4)
 
     @classmethod
-    def from_config(cls, _config: "ExperimentConfig", point: str) -> "PPLDefenseFilter":
+    def from_config(cls, config: "ExperimentConfig", point: str) -> "PPLDefenseFilter":
         """
-        Instantiate with preset thresholds based on defense point.
+        Instantiate from YAML config for a given defense point.
 
         Args:
-            config: ExperimentConfig (reserved for future YAML-level threshold config).
+            config: ExperimentConfig loaded from experiment YAML.
             point:  'pre_injection'  → Defense A (strict, lower thresholds)
                     'post_retrieval' → Defense B (lenient, higher thresholds)
         """
-        if point == "pre_injection":
-            return cls(global_ppl_threshold=80.0, spike_ppl_threshold=120.0)
-        elif point == "post_retrieval":
-            return cls(global_ppl_threshold=100.0, spike_ppl_threshold=150.0)
-        else:
+        defense = getattr(config, "defense", {}) or {}
+        point_cfg = defense.get(point, {})
+        if not point_cfg:
             raise ValueError(f"Unknown defense point: '{point}'. Use 'pre_injection' or 'post_retrieval'.")
+        return cls(
+            global_ppl_threshold=point_cfg.get("global_ppl_threshold", 100.0),
+            spike_ppl_threshold=point_cfg.get("spike_ppl_threshold",  150.0),
+            window_size=defense.get("window_size", 50),
+            stride=defense.get("stride",      25),
+            max_tokens=defense.get("max_tokens",   512),
+        )
