@@ -106,7 +106,7 @@ class Phase2Injector:
         print(f"[Phase2] Audit log → {output_audit_path}  ({len(records)} records)")
 
         report_path = Path(output_audit_path).parent / "report.md"
-        _write_report(report_path, records, inserted, blocked, self.config)
+        _write_report(report_path, records, inserted, blocked, self.config, self._chunk_tokens, self._chunk_overlap)
         print(f"[Phase2] Report    → {report_path}")
 
     # ── CUAD corpus loading + chunking ────────────────────────────────────────
@@ -255,7 +255,7 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _write_report(path: Path, records: list[dict], inserted: int, blocked: int, config) -> None:
+def _write_report(path: Path, records: list[dict], inserted: int, blocked: int, config, chunk_tokens: int = 300, chunk_overlap: int = 50) -> None:
     poison = [r for r in records if r["ground_truth_is_poison"]]
     clean  = [r for r in records if not r["ground_truth_is_poison"]]
 
@@ -290,7 +290,7 @@ def _write_report(path: Path, records: list[dict], inserted: int, blocked: int, 
         f"| Poison chunks (Phase 1) | {len(poison)} |",
         f"| Total candidates | {len(records)} |",
         f"| Embedding model | {config.embedding_model} |",
-        f"| Chunk size | {_CHUNK_TOKENS} tokens / {_CHUNK_OVERLAP} overlap |",
+        f"| Chunk size | {chunk_tokens} tokens / {chunk_overlap} overlap |",
         "",
         "---",
         "",
