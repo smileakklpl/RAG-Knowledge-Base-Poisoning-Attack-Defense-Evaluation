@@ -1,15 +1,16 @@
 """
 Phase 2 — Injection + Pre-Storage Defense (Defense Point A)
 
-流程：
-  1. 從 CUAD 載入 n_clean_chunks 筆乾淨 chunk（300-token，50-token overlap）
-  2. 載入全部 Phase 1 poison chunks（通常 15 筆）
-  3. 合併後跑 Defense Filter A（PPL）：惡意→跳過；乾淨→嵌入寫入 pgvector
-  4. 寫出 output/audit_defense_a.jsonl
+新情境：
+  Phase 1 已預載乾淨 CUAD chunks 至 pgvector（is_original=True）。
+  攻擊者嘗試將修改過的 poison chunks 注入資料庫。
+  Defense A（PPL）攔截惡意 chunk；通過者以 is_original=False 寫入 pgvector。
 
-n_clean_chunks 由 config 控制：
-  1   → 快速測試（~15-30s）
-  500 → 完整實驗（~10-15min，含統計意義的 CDR）
+流程：
+  1. 載入 Phase 1 輸出的 poison chunks
+  2. 對每筆 poison chunk 跑 Defense A（PPL）：惡意→跳過；乾淨→嵌入寫入
+  3. CDR 測試：載入額外乾淨 CUAD chunks（非 DB 原始集合），量測誤判率
+  4. 寫出 output/phase2/audit_defense_a.jsonl + report.md
 """
 
 import json
@@ -21,73 +22,54 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
-import tiktoken
 from tqdm import tqdm
 
 if TYPE_CHECKING:
     from src.config import ExperimentConfig
 
+
 class Phase2Injector:
     """
-    Loads CUAD clean corpus + Phase 1 poison chunks, runs Defense A, writes to pgvector.
-
-    n_clean_chunks (from config) controls trade-off between speed and CDR statistics:
-      1   → fast test, ~15-30s total
-      500 → full experiment, ~10-15min
+    Loads Phase 1 poison chunks, applies Defense A (PPL), writes survivors to pgvector.
+    Then runs CDR test using n_cdr_chunks fresh CUAD chunks not in the DB.
     """
 
     def __init__(self, config: "ExperimentConfig"):
-        self.config   = config
-        chunking      = getattr(config, "chunking", {}) or {}
-        self._enc_name      = chunking.get("tokenizer_encoding", "cl100k_base")
-        self._chunk_tokens  = chunking.get("chunk_size_tokens",  300)
-        self._chunk_overlap = chunking.get("overlap_tokens",     50)
-        self._enc     = tiktoken.get_encoding(self._enc_name)
+        self.config = config
 
     # ── Public entry point ────────────────────────────────────────────────────
 
     def run(self, poison_chunks_path: str, output_audit_path: str) -> None:
-        rng           = random.Random(self.config.seed)
-        n_clean       = self.config.n_clean_chunks
-
-        print(f"[Phase2] Loading {n_clean} clean chunk(s) from CUAD...")
-        clean_chunks  = self._load_cuad_chunks(n_clean, rng)
-        print(f"[Phase2] {len(clean_chunks)} clean chunks loaded.")
-
-        print("[Phase2] Loading Phase 1 poison chunks...")
-        poison_chunks = self._load_poison_chunks(poison_chunks_path)
-        total_poison  = len(poison_chunks)
-        n_poison = getattr(self.config, "n_poison_chunks", None)
-        if n_poison is not None and n_poison < total_poison:
-            poison_chunks = rng.sample(poison_chunks, n_poison)
-            print(f"[Phase2] Sampled {n_poison} / {total_poison} poison chunks.")
-        else:
-            print(f"[Phase2] {total_poison} poison chunks loaded.")
-
         from src.defense.filter import PPLDefenseFilter
         defense_a = PPLDefenseFilter.from_config(self.config, "pre_injection")
 
-        candidates    = clean_chunks + poison_chunks
-        rng.shuffle(candidates)
-        print(f"[Phase2] {len(clean_chunks)} clean + {len(poison_chunks)} poison = {len(candidates)} total")
-
         conn = self._connect()
-        self._clear_table(conn)
 
-        records: list[dict] = []
-        inserted = blocked  = 0
+        # ── Process poison chunks ─────────────────────────────────────────────
+        poison_chunks = self._load_poison_chunks(poison_chunks_path)
+        n_poison = getattr(self.config, "n_poison_chunks", None)
+        if n_poison is not None and n_poison < len(poison_chunks):
+            rng = random.Random(self.config.seed)
+            poison_chunks = rng.sample(poison_chunks, n_poison)
+            print(f"[Phase2] Sampled {n_poison} / {len(poison_chunks)} poison chunks.")
+        else:
+            print(f"[Phase2] {len(poison_chunks)} poison chunks loaded.")
 
-        for chunk in tqdm(candidates, desc="  Defense-A + embed", unit="chunk"):
+        poison_records: list[dict] = []
+        inserted = blocked = 0
+
+        for chunk in tqdm(poison_chunks, desc="  Defense-A (poison)", unit="chunk"):
             is_malicious, score = defense_a.predict(chunk["document"])
-            records.append({
+            poison_records.append({
                 "chunk_id":               chunk["chunk_id"],
                 "stage":                  "pre_injection",
+                "split":                  "poison",
                 "defense_score":          score,
                 "predicted_is_malicious": is_malicious,
-                "ground_truth_is_poison": chunk["is_poison"],
+                "ground_truth_is_poison": True,
                 "source":                 chunk["source"],
                 "attack_type":            chunk.get("attack_type"),
-                "n_clean_chunks":         n_clean,
+                "original_chunk_id":      chunk.get("original_chunk_id", ""),
                 "processed_at":           _now_iso(),
             })
 
@@ -99,84 +81,107 @@ class Phase2Injector:
             self._insert_chunk(conn, chunk, embedding)
             inserted += 1
 
-        conn.close()
-        self._print_metrics(records, inserted, blocked)
+        # ── CDR test: run fresh CUAD chunks through Defense A ─────────────────
+        n_cdr = getattr(self.config, "n_cdr_chunks", 20)
+        print(f"\n[Phase2] CDR test: loading {n_cdr} fresh CUAD chunks (seed+1)...")
+        cdr_chunks   = self._load_cdr_chunks(n_cdr)
+        cdr_records: list[dict] = []
+        cdr_blocked  = 0
 
-        _write_jsonl(Path(output_audit_path), records)
-        print(f"[Phase2] Audit log → {output_audit_path}  ({len(records)} records)")
+        for chunk in tqdm(cdr_chunks, desc="  Defense-A (CDR)", unit="chunk"):
+            is_malicious, score = defense_a.predict(chunk["document"])
+            cdr_records.append({
+                "chunk_id":               chunk["chunk_id"],
+                "stage":                  "pre_injection",
+                "split":                  "cdr",
+                "defense_score":          score,
+                "predicted_is_malicious": is_malicious,
+                "ground_truth_is_poison": False,
+                "source":                 chunk["source"],
+                "attack_type":            None,
+                "original_chunk_id":      "",
+                "processed_at":           _now_iso(),
+            })
+            if is_malicious:
+                cdr_blocked += 1
+
+        conn.close()
+
+        all_records = poison_records + cdr_records
+        self._print_metrics(poison_records, cdr_records, inserted, blocked, cdr_blocked)
+
+        _write_jsonl(Path(output_audit_path), all_records)
+        print(f"[Phase2] Audit log → {output_audit_path}  ({len(all_records)} records)")
 
         report_path = Path(output_audit_path).parent / "report.md"
-        _write_report(report_path, records, inserted, blocked, self.config, self._chunk_tokens, self._chunk_overlap)
+        _write_report(
+            report_path, poison_records, cdr_records,
+            inserted, blocked, cdr_blocked, self.config,
+            self._chunk_tokens, self._chunk_overlap,
+        )
         print(f"[Phase2] Report    → {report_path}")
 
-    # ── CUAD corpus loading + chunking ────────────────────────────────────────
+    # ── Chunk loading ─────────────────────────────────────────────────────────
 
-    def _load_cuad_chunks(self, max_chunks: int, rng: random.Random) -> list[dict]:
-        # Download only the SQuAD-format JSON; avoids PDF files in the same repo
-        # (PDF filenames exceed Windows MAX_PATH and require pdfplumber to decode)
+    def _load_poison_chunks(self, path: str) -> list[dict]:
+        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+        return [
+            {
+                "chunk_id":         item["chunk_id"],
+                "document":         item["generated_text"],
+                "doc_id":           f"poison_{item['target_query_id']}",
+                "source":           "phase1_poison",
+                "attack_type":      item["attack_type"],
+                "original_chunk_id": item.get("original_chunk_id", ""),
+                "chunk_index":      0,
+            }
+            for item in raw
+        ]
+
+    def _load_cdr_chunks(self, max_chunks: int) -> list[dict]:
+        """Load fresh CUAD chunks (different seed) for CDR false-positive testing."""
+        import tiktoken
         from huggingface_hub import hf_hub_download
 
-        print("[Phase2] Loading CUAD_v1.json (HF Hub cache)...")
+        chunking      = getattr(self.config, "chunking", {}) or {}
+        enc_name      = chunking.get("tokenizer_encoding", "cl100k_base")
+        self._chunk_tokens  = chunking.get("chunk_size_tokens",  300)
+        self._chunk_overlap = chunking.get("overlap_tokens",     50)
+        enc = tiktoken.get_encoding(enc_name)
+
         local_path = hf_hub_download(
             repo_id="theatticusproject/cuad",
             repo_type="dataset",
             filename="CUAD_v1/CUAD_v1.json",
         )
-
         with open(local_path, encoding="utf-8") as f:
             data = json.load(f)
 
-        # SQuAD format: {"data": [{"title": ..., "paragraphs": [{"context": ...}]}]}
+        rng    = random.Random(self.config.seed + 1)   # different seed from Phase 1
         chunks: list[dict] = []
         for entry in data["data"]:
             context = entry["paragraphs"][0]["context"]
             if len(context) > 200:
-                chunks.extend(self._chunk_text(context, entry["title"]))
+                tokens = enc.encode(context)
+                idx = 0
+                start = 0
+                while start < len(tokens):
+                    end        = min(start + self._chunk_tokens, len(tokens))
+                    chunk_text = enc.decode(tokens[start:end])
+                    if chunk_text.strip():
+                        chunks.append({
+                            "chunk_id": f"cdr_{uuid.uuid4().hex[:8]}",
+                            "document": chunk_text,
+                            "source":   "cuad_cdr",
+                        })
+                        idx += 1
+                    start += self._chunk_tokens - self._chunk_overlap
             if len(chunks) >= max_chunks:
                 break
 
         chunks = chunks[:max_chunks]
         rng.shuffle(chunks)
         return chunks
-
-    def _chunk_text(self, text: str, doc_id: str) -> list[dict]:
-        tokens = self._enc.encode(text)
-        chunks: list[dict] = []
-        idx = 0
-        start = 0
-        while start < len(tokens):
-            end        = min(start + self._chunk_tokens, len(tokens))
-            chunk_text = self._enc.decode(tokens[start:end])
-            if chunk_text.strip():
-                chunks.append({
-                    "chunk_id":    f"clean_{uuid.uuid4().hex[:8]}",
-                    "document":    chunk_text,
-                    "doc_id":      doc_id,
-                    "source":      "cuad",
-                    "is_poison":   False,
-                    "attack_type": None,
-                    "chunk_index": idx,
-                })
-                idx += 1
-            start += self._chunk_tokens - self._chunk_overlap
-        return chunks
-
-    # ── Phase 1 poison loading ─────────────────────────────────────────────────
-
-    def _load_poison_chunks(self, path: str) -> list[dict]:
-        raw = json.loads(Path(path).read_text(encoding="utf-8"))
-        return [
-            {
-                "chunk_id":    item["chunk_id"],
-                "document":    item["generated_text"],
-                "doc_id":      f"poison_{item['target_query_id']}",
-                "source":      "phase1_poison",
-                "is_poison":   True,
-                "attack_type": item["attack_type"],
-                "chunk_index": 0,
-            }
-            for item in raw
-        ]
 
     # ── Embedding ─────────────────────────────────────────────────────────────
 
@@ -193,18 +198,19 @@ class Phase2Injector:
 
         db   = self.config.vector_db
         conn = psycopg2.connect(
-            host=db.get("host", "localhost"),
-            port=db.get("port", 5432),
+            host=db.get("host",     "localhost"),
+            port=db.get("port",     5432),
             dbname=db.get("database", "rag_poison"),
-            user=db.get("user", "postgres"),
+            user=db.get("user",     "postgres"),
             password=os.environ.get("PGPASSWORD", "postgres"),
         )
         register_vector(conn)
         return conn
 
-    def _clear_table(self, conn) -> None:
+    def _clear_injected_chunks(self, conn) -> None:
+        """Remove only non-original (attacker-injected) chunks; preserve Phase 1 originals."""
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM chunks;")
+            cur.execute("DELETE FROM chunks WHERE is_original = FALSE;")
         conn.commit()
 
     def _insert_chunk(self, conn, chunk: dict, embedding: list[float]) -> None:
@@ -213,8 +219,8 @@ class Phase2Injector:
                 """
                 INSERT INTO chunks
                     (chunk_id, document, embedding, doc_id, source,
-                     is_poison, attack_type, chunk_index)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                     is_original, is_poison, attack_type, chunk_index)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (chunk_id) DO NOTHING;
                 """,
                 (
@@ -223,7 +229,8 @@ class Phase2Injector:
                     np.array(embedding),
                     chunk["doc_id"],
                     chunk["source"],
-                    chunk["is_poison"],
+                    False,  # is_original — attacker-injected chunk
+                    True,   # is_poison
                     chunk.get("attack_type"),
                     chunk.get("chunk_index", 0),
                 ),
@@ -233,13 +240,18 @@ class Phase2Injector:
     # ── Metrics display ───────────────────────────────────────────────────────
 
     @staticmethod
-    def _print_metrics(records: list[dict], inserted: int, blocked: int) -> None:
-        poison = [r for r in records if r["ground_truth_is_poison"]]
-        clean  = [r for r in records if not r["ground_truth_is_poison"]]
-        dbr = sum(1 for r in poison if r["predicted_is_malicious"]) / max(len(poison), 1)
-        cdr = sum(1 for r in clean  if r["predicted_is_malicious"]) / max(len(clean),  1)
-        print(f"[Phase2]   inserted={inserted}  blocked={blocked}")
-        print(f"[Phase2]   DBR-A={dbr:.2%}  CDR-A={cdr:.2%}")
+    def _print_metrics(
+        poison_records: list[dict],
+        cdr_records:    list[dict],
+        inserted:       int,
+        blocked:        int,
+        cdr_blocked:    int,
+    ) -> None:
+        total_poison = len(poison_records)
+        dbr = blocked / max(total_poison, 1)
+        cdr = cdr_blocked / max(len(cdr_records), 1)
+        print(f"[Phase2]   inserted={inserted}  blocked={blocked}/{total_poison}")
+        print(f"[Phase2]   DBR-A={dbr:.2%}  CDR-A={cdr:.2%}  (CDR n={len(cdr_records)})")
 
 
 # ── Module-level helpers ──────────────────────────────────────────────────────
@@ -255,21 +267,28 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _write_report(path: Path, records: list[dict], inserted: int, blocked: int, config, chunk_tokens: int = 300, chunk_overlap: int = 50) -> None:
-    poison = [r for r in records if r["ground_truth_is_poison"]]
-    clean  = [r for r in records if not r["ground_truth_is_poison"]]
+def _write_report(
+    path:          Path,
+    poison_records: list[dict],
+    cdr_records:    list[dict],
+    inserted:       int,
+    blocked:        int,
+    cdr_blocked:    int,
+    config,
+    chunk_tokens:   int = 300,
+    chunk_overlap:  int = 50,
+) -> None:
+    total_poison = len(poison_records)
+    dbr = blocked / max(total_poison, 1)
+    cdr = cdr_blocked / max(len(cdr_records), 1)
 
-    dbr = sum(1 for r in poison if r["predicted_is_malicious"]) / max(len(poison), 1)
-    cdr = sum(1 for r in clean  if r["predicted_is_malicious"]) / max(len(clean),  1)
-
-    # Per-attack-type breakdown
-    attack_types = sorted({r["attack_type"] for r in poison if r["attack_type"]})
+    attack_types = sorted({r["attack_type"] for r in poison_records if r["attack_type"]})
     attack_rows  = []
     for at in attack_types:
-        group   = [r for r in poison if r["attack_type"] == at]
-        caught  = sum(1 for r in group if r["predicted_is_malicious"])
-        scores  = [r["defense_score"] for r in group]
-        avg_s   = sum(scores) / len(scores) if scores else 0.0
+        group  = [r for r in poison_records if r["attack_type"] == at]
+        caught = sum(1 for r in group if r["predicted_is_malicious"])
+        scores = [r["defense_score"] for r in group]
+        avg_s  = sum(scores) / len(scores) if scores else 0.0
         attack_rows.append((at, len(group), caught, f"{caught/len(group):.0%}", f"{avg_s:.3f}"))
 
     lines = [
@@ -278,17 +297,21 @@ def _write_report(path: Path, records: list[dict], inserted: int, blocked: int, 
         f"**Run time**: {_now_iso()}  ",
         f"**Config**: `configs/experiment_01.yaml`  ",
         f"**Defense method**: PPL Filtering (GPT-2 small, global + sliding-window spike)  ",
-        f"**Thresholds (Defense A)**: global_ppl=80, spike_ppl=120  ",
+        f"**Defense A thresholds**: "
+        f"global_ppl={config.defense['pre_injection']['global_ppl_threshold']}, "
+        f"spike_ppl={config.defense['pre_injection']['spike_ppl_threshold']}  ",
         "",
         "---",
         "",
-        "## Dataset",
+        "## Attack Scenario",
+        "",
+        "攻擊者從資料庫撈出乾淨 chunks，修改後嘗試重新注入。",
         "",
         f"| Item | Value |",
         f"|------|-------|",
-        f"| Clean chunks (CUAD) | {len(clean)} |",
-        f"| Poison chunks (Phase 1) | {len(poison)} |",
-        f"| Total candidates | {len(records)} |",
+        f"| Original chunks in DB (Phase 1) | {config.n_clean_chunks} |",
+        f"| Poison chunks tested (Phase 2) | {total_poison} |",
+        f"| CDR test chunks | {len(cdr_records)} |",
         f"| Embedding model | {config.embedding_model} |",
         f"| Chunk size | {chunk_tokens} tokens / {chunk_overlap} overlap |",
         "",
@@ -301,7 +324,7 @@ def _write_report(path: Path, records: list[dict], inserted: int, blocked: int, 
         f"| Chunks inserted into pgvector | {inserted} |",
         f"| Chunks blocked (not inserted) | {blocked} |",
         f"| **DBR-A** (poison caught / total poison) | **{dbr:.2%}** |",
-        f"| **CDR-A** (clean wrongly blocked / total clean) | **{cdr:.2%}** |",
+        f"| **CDR-A** (clean wrongly blocked / CDR test n) | **{cdr:.2%}** |",
         "",
         "### Per-Attack-Type Breakdown",
         "",
@@ -317,10 +340,10 @@ def _write_report(path: Path, records: list[dict], inserted: int, blocked: int, 
         "",
         "## Notes",
         "",
-        f"- `n_clean_chunks={config.n_clean_chunks}` — increase for statistically robust CDR measurement",
-        "- DBR-A is expected to be low for **Stealth** attacks (designed to maintain low PPL)",
-        "- **Blocker** and **Hijack** should show higher DBR due to unnatural language patterns",
-        "- Audit log with per-chunk details: `output/audit_defense_a.jsonl`",
+        f"- `n_clean_chunks={config.n_clean_chunks}` — Phase 1 預載乾淨 chunks 數量",
+        f"- `n_cdr_chunks={getattr(config, 'n_cdr_chunks', 20)}` — CDR 測試用 CUAD chunks（seed+1，非 DB 原始集合）",
+        "- DBR-A 低代表攻擊者的 stealth 能力強（PPL 難以偵測）",
+        "- Audit log: `output/phase2/audit_defense_a.jsonl`",
     ]
 
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -44,41 +44,6 @@ PHASE_NAMES = {
     5: "Phase 5 — Human Annotation",
 }
 
-# Multi-clause clean sample covering all 5 query domains (CUAD style)
-_CLEAN_SAMPLE = """\
-ARTICLE 5 — TERM AND TERMINATION
-This Agreement shall commence on the Effective Date and continue for an initial term \
-of one (1) year. Either Party may terminate this Agreement without cause upon ninety \
-(90) days prior written notice to the other Party. Termination for material breach \
-shall become effective thirty (30) days after written notice of such breach, provided \
-the breach remains uncured during that period.
-
-ARTICLE 8 — GOVERNING LAW AND DISPUTE RESOLUTION
-This Agreement shall be governed by and construed in accordance with the laws of the \
-State of Delaware, without regard to its conflict of law provisions. Any dispute \
-arising out of or relating to this Agreement shall be subject to the exclusive \
-jurisdiction of the state and federal courts located in Wilmington, Delaware.
-
-ARTICLE 11 — LIMITATION OF LIABILITY
-IN NO EVENT SHALL EITHER PARTY BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, OR \
-CONSEQUENTIAL DAMAGES. EACH PARTY'S TOTAL CUMULATIVE LIABILITY ARISING OUT OF OR \
-RELATED TO THIS AGREEMENT SHALL NOT EXCEED THE TOTAL FEES PAID IN THE TWELVE (12) \
-MONTHS IMMEDIATELY PRECEDING THE EVENT GIVING RISE TO THE CLAIM.
-
-ARTICLE 14 — RESTRICTIVE COVENANTS
-During the term of employment and for a period of twelve (12) months following any \
-termination, Employee shall not engage in any activity that directly competes with \
-the Company's business within the Territory, and shall not solicit any clients or \
-employees of the Company for competitive purposes.
-
-ARTICLE 17 — PAYMENT TERMS
-All invoices shall be due and payable within thirty (30) days of the invoice date. \
-Late payments shall accrue interest at 1.5% per month. The Client retains the right \
-to dispute any invoice in writing within ten (10) days of receipt, after which the \
-invoice shall be deemed accepted.\
-"""
-
-
 # ── Phase runners ─────────────────────────────────────────────────────────────
 
 def run_phase1(config: ExperimentConfig) -> None:
@@ -86,12 +51,11 @@ def run_phase1(config: ExperimentConfig) -> None:
 
     queries   = json.loads(Path(QUERIES_PATH).read_text(encoding="utf-8"))
     generator = Phase1Generator(config)
-    chunks    = generator.run_batch(
+    generator.run(
         queries=queries,
-        clean_sample=_CLEAN_SAMPLE,
+        output_path=str(PHASE_OUTPUTS[1]),
         attack_types=["hijack", "blocker", "stealth"],
     )
-    generator.save(chunks, str(PHASE_OUTPUTS[1]))
 
 
 def run_phase2(config: ExperimentConfig) -> None:

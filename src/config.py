@@ -23,7 +23,11 @@ class ExperimentConfig:
     # Phase 2: clean chunks to load from CUAD (1 = fast test, 500+ = full experiment)
     n_clean_chunks:    int         = 1
     # Phase 2: max poison chunks to inject (None = use all from Phase 1)
-    n_poison_chunks:   int         = None
+    n_poison_chunks:        int    = None
+    # Phase 1: chunks attacker retrieves from DB per query as attack base
+    n_retrieved_per_query:  int    = 3
+    # Phase 2: clean chunks loaded for CDR (false positive) measurement
+    n_cdr_chunks:           int    = 20
     # Phase 2: CUAD chunking parameters
     chunking:          Dict        = field(default_factory=lambda: {
         "tokenizer_encoding": "cl100k_base",

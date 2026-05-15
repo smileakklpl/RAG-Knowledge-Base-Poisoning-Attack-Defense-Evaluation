@@ -107,9 +107,8 @@ for query in queries:
 建議在專案根目錄新增以下結構：
 
 - `configs/`：所有實驗設定（模型、top-k、poison ratio、seed、防禦閾值）。
-- `data/clean/`：乾淨語料（CUAD）。
-- `data/poison/`：中毒語料（模板版與 LLM 版分開）。
-- `data/advbench/`：AdvBench 攻擊範本。
+- `data/`：查詢集（queries.json）；CUAD 語料由 HF Hub 自動下載，不放在 data/ 中。
+- `data/poison/`：中毒語料（Phase 1 輸出）。
 - `artifacts/db/`：pgvector 備份 / 重建腳本。
 - `artifacts/logs/`：retrieval log、defense log（A/B 兩個防禦點分開）。
 - `artifacts/results/`：每次實驗的 metrics（json/csv）。

@@ -59,15 +59,17 @@
 ## 4. 系統架構：五階段管線概覽
 
 ```
-[Phase 1] 攻擊生成
-  Attacker LLM 批次生成 Poisoned Chunks
-  攻擊類型：hijack / blocker / stealth
-  AdvBench 提供攻擊意圖 few-shot 範本
+[Phase 1] 預載 DB + 攻擊生成
+  Step A: n_clean_chunks 筆 CUAD → pgvector (is_original=True)
+  Step B: 對每個 query，從 DB 撈出最相關 chunk（模擬攻擊者透過 RAG API 取得語料）
+  Step C: Attacker LLM 修改撈到的 chunk
+          攻擊類型：hijack / blocker / stealth
         ↓
-[Phase 2] 入庫 + 防禦點 A
-  Embedding 向量化 → Defense Filter A
-    ├ 惡意 → 物理 DELETE（不寫入 pgvector）
-    └ 乾淨 → INSERT INTO pgvector
+[Phase 2] 注入嘗試 + 防禦點 A
+  攻擊者嘗試將修改版 chunk 注入 DB
+  Defense Filter A
+    ├ 惡意 → 拒絕注入（不寫入 pgvector）
+    └ 通過 → INSERT INTO pgvector (is_original=False)
   量測 DBR-A、CDR-A
         ↓
 [Phase 3] 檢索 + 防禦點 B
@@ -108,8 +110,7 @@
 
 | 資料集 | 角色 | 用途說明 |
 |--------|------|---------|
-| **CUAD** | Clean Corpus | 510 份英文商業法律合約，提供 RAG 知識庫的主要語料（Phase 2 索引、Phase 3 檢索） |
-| **AdvBench** | 攻擊參考集 | 500 筆惡意行為描述（Zou et al., 2023），作為 Phase 1 `malicious_payload` 的 few-shot 範本，讓 Attacker LLM 生成更有攻擊性的 payload |
+| **CUAD** | Clean Corpus + 攻擊基底 | 510 份英文商業法律合約；Phase 1 預載至 pgvector 作為乾淨知識庫，同時作為攻擊者修改的目標 chunk 來源 |
 
 ---
 

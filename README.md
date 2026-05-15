@@ -9,10 +9,10 @@
 
 本專案實現一個**端到端的 RAG 資料中毒攻擊測試管線**，目標是對企業內部法律合約知識庫進行安全性評估。透過五個階段的自動化流程，模擬未授權的資料中毒攻擊，並在**雙防禦點**（入庫前 + 檢索後）驗證防禦機制的有效性。
 
-**攻擊場景**：公司內部使用 RAG 系統回答合約相關問題（如終止條款、責任上限、管轄權等），攻擊者在向量資料庫中注入中毒文本，導致 LLM 輸出錯誤的合約條款。
+**攻擊場景**：企業 RAG 系統已預載乾淨的 CUAD 法律合約知識庫（`is_original=True`）。有心人士透過 RAG 系統查詢撈出相關 chunks，利用 LLM 以三種攻擊手法（Hijack / Blocker / Stealth）修改文本後，嘗試重新注入資料庫，企圖污染乾淨語料，使 Target LLM 輸出錯誤的合約條款。
 
 **防禦設計**：防禦器佈署在「LLM 接觸到中毒文本之前」的兩個關卡：
-- **防禦點 A（Phase 2）**：Attacker 產生的中毒文本送進向量資料庫前先過濾，偵測到惡意 → **標記 + 物理 DELETE**，阻止入庫；僅乾淨文本寫入 pgvector。
+- **防禦點 A（Phase 2）**：攻擊者嘗試注入的修改版 chunk 送進向量資料庫前先過濾，偵測到惡意 → **不寫入**，保持資料庫乾淨；通過者以 `is_original=False` 寫入。
 - **防禦點 B（Phase 3）**：Target LLM 從 RAG 檢索 Top-K 後送入生成前再過濾，偵測到殘留惡意 → **標記 + 物理 DELETE**（從 pgvector 移除），剩餘乾淨 chunk 作為 sanitized context。
 
 ---
@@ -99,8 +99,10 @@ vector_db:
   database: "rag_poison"
 
 top_k: [5]                         # 檢索 top-k 候選
-n_clean_chunks:  100               # Phase 2 載入的乾淨 CUAD 文件數（1=快速測試）
-n_poison_chunks: 5                 # Phase 2 注入的毒化文件數（null=全部使用）
+n_clean_chunks:        100         # Phase 1 預載至 DB 的乾淨 CUAD chunks（1=快速測試）
+n_poison_chunks:       5           # Phase 2 注入的毒化 chunks（null=全部使用）
+n_retrieved_per_query: 3           # 攻擊者每個 query 從 DB 撈幾個 chunks 做為攻擊基底
+n_cdr_chunks:          20          # Phase 2 CDR 測試用的額外乾淨 chunks
 seed: 42                           # 隨機種子
 ```
 
@@ -110,8 +112,8 @@ seed: 42                           # 隨機種子
 
 | 階段 | 目的 | 輸入 | 輸出 |
 |------|------|------|------|
-| **Phase 1** | 攻擊文本生成<br/>（三種攻擊類型） | `data/queries.json`<br/>+ 清淨合約樣本 | `output/phase1/poison_chunks.json` |
-| **Phase 2** | 入庫 + **防禦點 A**<br/>（入庫前過濾） | CUAD + Phase 1 輸出 | pgvector 資料表<br/>`output/phase2/audit_defense_a.jsonl` |
+| **Phase 1** | 預載乾淨 DB + 攻擊文本生成<br/>（撈出 chunk → 修改） | `data/queries.json`<br/>+ CUAD（自動從 HF Hub 下載） | pgvector（乾淨原始 chunks）<br/>`output/phase1/poison_chunks.json` |
+| **Phase 2** | 注入嘗試 + **防禦點 A**<br/>（入庫前過濾） | Phase 1 poison chunks | pgvector（通過者注入）<br/>`output/phase2/audit_defense_a.jsonl` |
 | **Phase 3** | 檢索 + **防禦點 B**<br/>（檢索後過濾） | 查詢集 + 向量庫 | `output/phase3/retrieval_results.json`<br/>`output/phase3/audit_defense_b.jsonl` |
 | **Phase 4** | 目標 LLM 生成回答 | Sanitized Context | `output/phase4/phase4_results.json` |
 | **Phase 5** | 人工評估 | Phase 4 輸出 JSON | `output/phase5/phase5_annotated.json` |
@@ -122,8 +124,7 @@ seed: 42                           # 隨機種子
 
 | 資料集 | 用途 | 說明 |
 |--------|------|------|
-| **[CUAD](https://huggingface.co/datasets/theatticusproject/cuad)** | Clean Corpus | 510 份英文商業法律合約，提供 RAG 知識庫的主要語料 |
-| **[AdvBench](https://github.com/llm-attacks/llm-attacks)** | 攻擊參考集 | 500 筆惡意行為描述，作為 Phase 1 生成 `malicious_payload` 的 few-shot 範本 |
+| **[CUAD](https://huggingface.co/datasets/theatticusproject/cuad)** | Clean Corpus + 攻擊基底 | 510 份英文商業法律合約；Phase 1 預載至 DB 並作為攻擊者修改的目標 |
 
 - **攻擊領域**：企業合約 Q&A（終止條款、責任上限、管轄權、付款條款）
 - **觸發關鍵詞**：每份中毒文本記錄 `trigger_keywords`，供 Phase 3 驗證 RSR
@@ -151,27 +152,42 @@ seed: 42                           # 隨機種子
 ## 雙防禦點架構
 
 ```
-                     ┌──────────────────┐
-                     │  Attacker LLM    │
-                     │  生成中毒文本    │
-                     └────────┬─────────┘
-                              │ poison_chunks
-                              ▼
+        ┌──────────────────────────────────────────────┐
+        │  Phase 1 — 預載乾淨 DB                       │
+        │  n_clean_chunks 筆 CUAD chunks               │
+        │  寫入 pgvector（is_original=True）            │
+        └──────────────────────┬───────────────────────┘
+                               │
+              ┌────────────────▼────────────────┐
+              │      pgvector 向量庫             │
+              │  （初始狀態：全為乾淨 originals） │
+              └──────┬──────────────────────────┘
+                     │ 攻擊者透過 RAG 撈出 top-k chunks
+                     ▼
+        ┌──────────────────────────────────────────────┐
+        │  Phase 1 — 攻擊生成                          │
+        │  Attacker LLM 以三種手法修改撈到的 chunk      │
+        │  Hijack / Blocker / Stealth                  │
+        └──────────────────────┬───────────────────────┘
+                               │ poison_chunks.json
+                               ▼
    ┌──────────────────────────────────────────────┐
-   │  防禦點 A（入庫前）                           │
-   │  - 偵測 Attacker 嘗試注入的惡意 chunk         │
-   │  - 命中 → 物理 DELETE，不寫入資料庫           │
-   │  - 通過 → 寫入 pgvector                       │
+   │  防禦點 A — Phase 2（入庫前）                 │
+   │  - 偵測重新注入的修改版 chunk                 │
+   │  - 命中 → 不寫入資料庫                        │
+   │  - 通過 → 寫入 pgvector（is_original=False）  │
    └──────────────────────┬───────────────────────┘
                           │
                           ▼
                   ┌──────────────────┐
                   │ pgvector 向量庫  │
+                  │（含 originals +  │
+                  │  通過防禦的 poison）
                   └────────┬─────────┘
                            │  Top-K query
                            ▼
    ┌──────────────────────────────────────────────┐
-   │  防禦點 B（檢索後 / Target LLM 前）           │
+   │  防禦點 B — Phase 3（檢索後 / Target LLM 前）│
    │  - 偵測殘留的惡意 chunk                       │
    │  - 命中 → 標記 + 物理 DELETE from pgvector    │
    │  - 通過 → 進入 Target LLM                     │
@@ -295,14 +311,15 @@ docs/
 - [x] **防禦方法論** — `src/defense/filter.py` PPL Filtering 實作完成
   - GPT-2 small（HuggingFace）計算 global PPL + sliding window spike
   - 文獻：RAGuard (IEEE BigData 2025)、Alon & Kamfonas (arXiv 2308.14132)
-- [x] **Phase 1** — 攻擊文本生成（含迭代最佳化，smoke test 驗證通過）
-  - 三種攻擊類型：Hijack / Blocker / Stealth
-  - GeneratorAgent + 評估器自動迭代改進
-  - 快速驗證工具 `scripts/smoke_test.py`
-- [x] **Phase 2** — `src/pipeline/phase2.py` 實作完成，執行驗證通過（18s）
-  - CUAD 載入：`n_clean_chunks`（config 控制，1=快速測試，500=完整實驗）
-  - Defense Filter A（PPL，global=80 / spike=120）→ 通過才寫入 pgvector
-  - 測試結果（1 clean + 15 poison）：DBR-A=13.33%（blocker=40%, hijack=0%, stealth=0%），CDR-A=0.00%
+- [x] **Phase 1** — 重構為「撈出 → 修改」攻擊情境
+  - Step A：`n_clean_chunks` 筆 CUAD chunks 預載至 pgvector（`is_original=True`）
+  - Step B：對每個 query，從 DB 撈出 top-`n_retrieved_per_query` 個最相關的 original chunk
+  - Step C：Attacker LLM 以三種手法（Hijack / Blocker / Stealth）修改撈到的 chunk，三個評估器迭代優化
+  - `PoisonChunk` 新增 `original_chunk_id` / `original_chunk_text`，供 Phase 2 審計對照
+- [x] **Phase 2** — 重構為「注入嘗試 + 防禦點 A」
+  - DB 已預載乾淨 originals（Phase 1 完成），Phase 2 不再載入 CUAD
+  - Defense Filter A（PPL，global=80 / spike=120）→ 通過者以 `is_original=False` 寫入
+  - CDR 測試：額外載入 `n_cdr_chunks` 筆 CUAD chunks（seed+1，非 DB 原始集合）量測誤攔率
 - [x] **Phase 3** — `src/pipeline/phase3.py` 實作完成，執行驗證通過（31s）
   - bge-m3 embed query → pgvector cosine top-k，跑三個 k 值（3/5/10）
   - Defense Filter B（PPL，global=100 / spike=150）→ 物理 DELETE 惡意 chunk
