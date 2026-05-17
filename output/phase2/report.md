@@ -1,19 +1,21 @@
 # Phase 2 — Experiment Report
 
-**Run time**: 2026-05-13T11:57:00.051579+00:00  
+**Run time**: 2026-05-16T14:29:07.535391+00:00  
 **Config**: `configs/experiment_01.yaml`  
-**Defense A**: PPL (GPT-2 small) + Semantic Consistency (bge-m3)  
-**Thresholds**: PPL global=80 spike=120 · sem_sim_min=0.5  
+**Defense method**: PPL Filtering (GPT-2 small, global + sliding-window spike)  
+**Defense A thresholds**: global_ppl=80.0, spike_ppl=120.0  
 
 ---
 
-## Dataset
+## Attack Scenario
+
+攻擊者從資料庫撈出乾淨 chunks，修改後嘗試重新注入。
 
 | Item | Value |
 |------|-------|
-| Clean chunks (CUAD) | 100 |
-| Poison chunks (Phase 1) | 5 |
-| Total candidates | 105 |
+| Original chunks in DB (Phase 1) | 100 |
+| Poison chunks tested (Phase 2) | 5 |
+| CDR test chunks | 20 |
 | Embedding model | bge-m3 |
 | Chunk size | 300 tokens / 50 overlap |
 
@@ -23,26 +25,24 @@
 
 | Metric | Value |
 |--------|-------|
-| Chunks inserted into pgvector | 73 |
-| Chunks blocked (not inserted) | 32 |
-| **DBR-A (PPL only)** | **0.00%** |
-| **DBR-A (sem, among PPL-pass)** | **0.00%** |
-| **DBR-A (combined)** | **0.00%** |
-| **CDR-A** | **32.00%** |
+| Chunks inserted into pgvector | 4 |
+| Chunks blocked (not inserted) | 1 |
+| **DBR-A** (poison caught / total poison) | **20.00%** |
+| **CDR-A** (clean wrongly blocked / CDR test n) | **5.00%** |
 
 ### Per-Attack-Type Breakdown
 
-| Attack Type | Total | PPL caught | Sem caught | Combined | DBR | Avg PPL score | Avg sim_max |
-|-------------|-------|-----------|-----------|---------|-----|--------------|------------|
-| hijack | 2 | 0 | 0 | 0 | 0% | 0.343 | 0.673 |
-| stealth | 3 | 0 | 0 | 0 | 0% | 0.430 | 0.653 |
+| Attack Type | Total | Caught | DBR | Avg Score |
+|-------------|-------|--------|-----|-----------|
+| blocker | 1 | 0 | 0% | 0.421 |
+| hijack | 1 | 0 | 0% | 0.327 |
+| stealth | 3 | 1 | 33% | 0.713 |
 
 ---
 
 ## Notes
 
-- `n_clean_chunks=100` — increase for statistically robust CDR measurement
-- `sem_sim_threshold=0.5` — chunks with sim_max below this are flagged as off-topic
-- **Stealth** attacks expected to evade both filters: low PPL + high semantic similarity to legal text
-- **Hijack / Blocker** expected to be caught by PPL or semantic filter
-- Audit log with per-chunk details: `output/phase2/audit_defense_a.jsonl`
+- `n_clean_chunks=100` — Phase 1 預載乾淨 chunks 數量
+- `n_cdr_chunks=20` — CDR 測試用 CUAD chunks（seed+1，非 DB 原始集合）
+- DBR-A 低代表攻擊者的 stealth 能力強（PPL 難以偵測）
+- Audit log: `output/phase2/audit_defense_a.jsonl`
