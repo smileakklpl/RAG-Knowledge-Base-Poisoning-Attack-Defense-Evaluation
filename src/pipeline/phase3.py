@@ -107,6 +107,7 @@ class Phase3Retriever:
                             "similarity":    round(c["similarity"], 4),
                             "is_blocked":    c["chunk_id"] in blocked_ids,
                             "defense_score": chunk_scores[c["chunk_id"]][1],
+                            "document":      c["document"],
                             "text_preview":  c["document"][:150],
                         }
                         for c in raw_k
