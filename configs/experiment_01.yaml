@@ -3,7 +3,7 @@
 
 # Model Selection (Gemma4 family quantized models for local inference)
 attacker_model:  "gemma4:e4b"      # LLM for generating poison chunks
-target_model:    "gemma4:26b"      # Target LLM simulating RAG user
+target_model:    "llama3.1:8b"      # Target LLM simulating RAG user
 embedding_model: "bge-m3"          # Semantic encoder
 
 # Evaluation
