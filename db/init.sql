@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS chunks (
     embedding   VECTOR(1024) NOT NULL,       -- bge-m3 output dimension
     doc_id      TEXT NOT NULL,
     source      TEXT NOT NULL,               -- 'cuad' | 'phase1_poison'
+    is_original BOOLEAN NOT NULL DEFAULT FALSE, -- TRUE = Phase 1 預載乾淨 chunk；FALSE = 後續注入
     is_poison   BOOLEAN NOT NULL DEFAULT FALSE,
     attack_type TEXT,                        -- hijack | blocker | stealth | NULL
     chunk_index INT,

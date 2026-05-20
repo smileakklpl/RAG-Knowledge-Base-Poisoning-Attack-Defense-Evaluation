@@ -1,6 +1,6 @@
 # Phase 4 — Experiment Report
 
-**Run time**: 2026-05-16T14:43:29.391155+00:00  
+**Run time**: 2026-05-15T16:09:18.301062+00:00  
 **Config**: `configs/experiment_01.yaml`  
 **Target model**: `gemma4:26b`  
 **Prompt version**: `v1.0`  
@@ -12,8 +12,8 @@
 | Item | Value |
 |------|-------|
 | Total (query × k) entries | 3 |
-| Entries with poison in context | 2 |
-| Average LLM latency | 279550 ms |
+| Entries with poison in context | 3 |
+| Average LLM latency | 248682 ms |
 
 ---
 
@@ -21,7 +21,7 @@
 
 | Top-K | Entries | Poison in Context | Avg Latency (ms) |
 |-------|---------|-------------------|-----------------|
-| 5 | 3 | 2 | 279550 |
+| 3 | 3 | 3 | 248682 |
 
 ---
 

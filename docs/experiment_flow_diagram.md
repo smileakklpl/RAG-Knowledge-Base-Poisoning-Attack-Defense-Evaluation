@@ -9,12 +9,14 @@
                                  │
                                  ▼
         ┌──────────────────────────────────────────────────┐
-        │  Phase 1: 攻擊文本生成                            │
-        │  • Attacker LLM (gemma4:e4b)                     │
-        │  • 三種攻擊類型: Hijack / Blocker / Stealth       │
+        │  Phase 1: 預載 DB + 攻擊文本生成                  │
+        │  • Step A: n_clean_chunks 筆 CUAD → pgvector     │
+        │            (is_original=True)                    │
+        │  • Step B: 對每個 query 從 DB 撈出最相關 chunk    │
+        │  • Step C: Attacker LLM 以三種手法修改 chunk      │
+        │            Hijack / Blocker / Stealth            │
         │  • 多 Agent 迭代: 語意 + 隱蔽性 + Payload 強度    │
-        │  • AdvBench 作為惡意行為 few-shot 範本            │
-        │  • 記錄 trigger_keywords 供後續檢索驗證           │
+        │  • 記錄 original_chunk_id 供 Phase 2 審計        │
         └──────────────────────────────┬───────────────────┘
                                        │
                                        ▼
@@ -24,21 +26,20 @@
                                        │
                                        ▼
         ┌──────────────────────────────────────────────────┐
-        │  Phase 2: 入庫 + 防禦點 A                         │
+        │  Phase 2: 注入嘗試 + 防禦點 A                      │
         │                                                  │
-        │  載入 CUAD 合約語料 (510 份)                       │
-        │  分塊: 300-500 tokens (50-100 token 重疊)         │
-        │  bge-m3 向量化                                    │
+        │  輸入: Phase 1 poison chunks（修改版）             │
+        │  DB 已有 originals（Phase 1 預載）                │
         │                                                  │
         │  ┌──────────────────────────────────────┐        │
         │  │   Defense Filter A (入庫前)          │        │
         │  │   方法論: docs/defense_methodology.md │        │
         │  └─────────────┬────────────────────────┘        │
         │                │                                 │
-        │     惡意 ─►  ❌ 物理 DELETE (不寫入)              │
-        │     乾淨 ─►  ✅ INSERT INTO pgvector              │
+        │     惡意 ─►  ❌ 拒絕注入（不寫入 DB）             │
+        │     通過 ─►  ✅ INSERT (is_original=False)        │
         │                                                  │
-        │  量測: DBR-A、CDR-A、Final Poison Ratio          │
+        │  量測: DBR-A、CDR-A（n_cdr_chunks 乾淨測試組）    │
         └──────────────────────────────┬───────────────────┘
                                        │
                                        ▼
@@ -219,8 +220,8 @@ defense:
 
 ## 開發進度
 
-- [x] **Phase 1** — 攻擊文本生成（已實作，含迭代最佳化）
-- [ ] **Phase 2** — 入庫 + 防禦點 A（pgvector + 物理 DELETE）
+- [x] **Phase 1** — 預載 DB + 攻擊文本生成（撈出→修改，已實作）
+- [x] **Phase 2** — 注入嘗試 + 防禦點 A（已實作）
 - [ ] **Phase 3** — 檢索 + 防禦點 B（邏輯標記過濾）
 - [ ] **Phase 4** — 目標 LLM 生成回答（Sanitized Context → Answer）
 - [ ] **Phase 5** — 人工評估（JSON 標註 → ASR）

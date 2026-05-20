@@ -113,7 +113,7 @@ class Phase3Retriever:
                     ],
                     "poison_in_topk":      bool(poison_in_raw),
                     "poison_rank":         poison_in_raw[0]["rank"] if poison_in_raw else None,
-                    "sanitized_context":   "\n\n---\n\n".join(c["document"] for c in sanitized_k),
+                    "sanitized_context":   getattr(self.config, "context_separator", "\n\n---\n\n").join(c["document"] for c in sanitized_k),
                     "sanitized_chunk_ids": [c["chunk_id"] for c in sanitized_k],
                 })
 
