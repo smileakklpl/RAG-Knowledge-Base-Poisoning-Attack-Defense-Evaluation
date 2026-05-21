@@ -1,10 +1,10 @@
 # Phase 3 — Experiment Report
 
-**Run time**: 2026-05-16T14:29:30.728832+00:00  
+**Run time**: 2026-05-20T15:15:27.671351+00:00  
 **Config**: `configs/experiment_01.yaml`  
 **Defense method**: PPL Filtering (GPT-2 small)  
 **Thresholds (Defense B)**: global_ppl=100, spike_ppl=150  
-**Top-K values tested**: [5]  
+**Top-K values tested**: [6]  
 
 ---
 
@@ -12,7 +12,7 @@
 
 | Top-K | Queries | Poison Hit | RSR |
 |-------|---------|------------|-----|
-| 5 | 3 | 2 | 66.67% |
+| 6 | 3 | 2 | 66.67% |
 
 ---
 
@@ -20,10 +20,10 @@
 
 | Metric | Value |
 |--------|-------|
-| Unique chunks evaluated | 14 |
+| Unique chunks evaluated | 15 |
 | Poison chunks in top-k | 4 |
 | **DBR-B** (poison caught / total poison in top-k) | **0.00%** |
-| **CDR-B** (clean wrongly blocked / total clean in top-k) | **10.00%** |
+| **CDR-B** (clean wrongly blocked / total clean in top-k) | **0.00%** |
 
 ---
 
