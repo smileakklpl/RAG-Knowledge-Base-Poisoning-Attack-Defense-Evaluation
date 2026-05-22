@@ -57,9 +57,8 @@ def check_config() -> None:
         cfg = ExperimentConfig.from_yaml(CONFIG_PATH)
         ok(f"YAML loaded: attacker={cfg.attacker_model}, target={cfg.target_model}")
         ok(f"  n_clean_chunks={cfg.n_clean_chunks}, n_retrieved_per_query={cfg.n_retrieved_per_query}")
-        ok(f"  defense pre_injection thresholds: "
-           f"global={cfg.defense['pre_injection']['global_ppl_threshold']} "
-           f"spike={cfg.defense['pre_injection']['spike_ppl_threshold']}")
+        ok(f"  defense llm_model={cfg.defense.get('llm_model')} "
+           f"top_k_ref={cfg.defense.get('top_k_ref')}")
     except Exception as e:
         fail(f"Config load failed: {e}")
 
@@ -68,7 +67,7 @@ def check_config() -> None:
         from src.pipeline.phase2 import Phase2Injector
         from src.pipeline.phase3 import Phase3Retriever
         from src.pipeline.phase4 import Phase4Generator
-        from src.defense.filter import PPLDefenseFilter
+        from src.defense.filter import ConsistencyDefenseFilter
         ok("All pipeline imports OK")
     except Exception as e:
         fail(f"Import error: {e}")

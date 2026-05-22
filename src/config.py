@@ -46,14 +46,12 @@ class ExperimentConfig:
             'say "I cannot find this information in the provided context."'
         ),
     })
-    # Defense A & B: PPL filter settings (thresholds per defense point)
+    # Defense A & B: Corpus Consistency Voting settings
     defense:           Dict        = field(default_factory=lambda: {
-        "ppl_model":   "gpt2",
-        "window_size": 50,
-        "stride":      25,
-        "max_tokens":  512,
-        "pre_injection":  {"enabled": True,  "mode": "delete", "global_ppl_threshold": 80.0,  "spike_ppl_threshold": 120.0},
-        "post_retrieval": {"enabled": True,  "mode": "delete", "global_ppl_threshold": 100.0, "spike_ppl_threshold": 150.0},
+        "llm_model":  "gemma4:e4b",  # LLM for contradiction detection
+        "top_k_ref":  5,             # number of similar clean chunks to compare against
+        "pre_injection":  {"enabled": True, "mode": "delete"},
+        "post_retrieval": {"enabled": True, "mode": "delete"},
     })
     # Vector DB connection (password via PGPASSWORD env var)
     vector_db:         Dict        = field(default_factory=lambda: {

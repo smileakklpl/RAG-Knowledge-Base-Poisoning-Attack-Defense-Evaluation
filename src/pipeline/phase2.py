@@ -4,11 +4,11 @@ Phase 2 — Injection + Pre-Storage Defense (Defense Point A)
 新情境：
   Phase 1 已預載乾淨 CUAD chunks 至 pgvector（is_original=True）。
   攻擊者嘗試將修改過的 poison chunks 注入資料庫。
-  Defense A（PPL）攔截惡意 chunk；通過者以 is_original=False 寫入 pgvector。
+  Defense A（語料庫一致性投票）攔截惡意 chunk；通過者以 is_original=False 寫入 pgvector。
 
 流程：
   1. 載入 Phase 1 輸出的 poison chunks
-  2. 對每筆 poison chunk 跑 Defense A（PPL）：惡意→跳過；乾淨→嵌入寫入
+  2. 對每筆 poison chunk 跑 Defense A（一致性比對）：惡意→跳過；乾淨→嵌入寫入
   3. CDR 測試：載入額外乾淨 CUAD chunks（非 DB 原始集合），量測誤判率
   4. 寫出 output/phase2/audit_defense_a.jsonl + report.md
 """
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 class Phase2Injector:
     """
-    Loads Phase 1 poison chunks, applies Defense A (PPL), writes survivors to pgvector.
+    Loads Phase 1 poison chunks, applies Defense A (corpus consistency voting), writes survivors to pgvector.
     Then runs CDR test using n_cdr_chunks fresh CUAD chunks not in the DB.
     """
 
@@ -40,10 +40,10 @@ class Phase2Injector:
     # ── Public entry point ────────────────────────────────────────────────────
 
     def run(self, poison_chunks_path: str, output_audit_path: str) -> None:
-        from src.defense.filter import PPLDefenseFilter
-        defense_a = PPLDefenseFilter.from_config(self.config, "pre_injection")
-
         conn = self._connect()
+
+        from src.defense.filter import ConsistencyDefenseFilter
+        defense_a = ConsistencyDefenseFilter.from_config(self.config, conn)
 
         # ── Process poison chunks ─────────────────────────────────────────────
         poison_chunks = self._load_poison_chunks(poison_chunks_path)
@@ -296,10 +296,9 @@ def _write_report(
         "",
         f"**Run time**: {_now_iso()}  ",
         f"**Config**: `configs/experiment_01.yaml`  ",
-        f"**Defense method**: PPL Filtering (GPT-2 small, global + sliding-window spike)  ",
-        f"**Defense A thresholds**: "
-        f"global_ppl={config.defense['pre_injection']['global_ppl_threshold']}, "
-        f"spike_ppl={config.defense['pre_injection']['spike_ppl_threshold']}  ",
+        f"**Defense method**: Corpus Consistency Voting (LLM-based contradiction detection)  ",
+        f"**Defense A LLM**: `{config.defense.get('llm_model', 'gemma4:e4b')}`  "
+        f"top_k_ref={config.defense.get('top_k_ref', 5)}  ",
         "",
         "---",
         "",
@@ -342,7 +341,7 @@ def _write_report(
         "",
         f"- `n_clean_chunks={config.n_clean_chunks}` — Phase 1 預載乾淨 chunks 數量",
         f"- `n_cdr_chunks={getattr(config, 'n_cdr_chunks', 20)}` — CDR 測試用 CUAD chunks（seed+1，非 DB 原始集合）",
-        "- DBR-A 低代表攻擊者的 stealth 能力強（PPL 難以偵測）",
+        "- DBR-A 低代表惡意 chunk 的語意與乾淨語料高度相似，LLM 難以區分",
         "- Audit log: `output/phase2/audit_defense_a.jsonl`",
     ]
 

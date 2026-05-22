@@ -1,155 +1,138 @@
 """
-defense/filter.py — PPL Filtering Defense (Defense Point A & B)
+defense/filter.py — Corpus Consistency Defense (Defense Point A & B)
 
-Method: Perplexity-based anomaly detection using GPT-2 small.
+Method: LLM-based factual contradiction detection against the clean corpus.
 
-Two detection signals:
-  1. Global PPL  — overall chunk perplexity; high value indicates Blocker-type anomaly
-  2. Window spike PPL — maximum PPL over sliding windows; detects Hijack-type transition points
+For each chunk to evaluate:
+  1. Embed the chunk and retrieve top-k semantically similar CLEAN chunks (is_original=True) from DB
+  2. Ask the LLM (attacker model) whether the chunk contradicts any factual claims in those references
+  3. Contradiction detected → is_malicious=True, score=1.0
+
+This catches Stealth attacks that fool PPL-based filters by maintaining natural language
+while silently altering key facts (numbers, dates, jurisdictions, amounts).
 
 References:
-  - RAGuard (Cheng et al., IEEE BigData 2025): chunk-wise PPL filtering for RAG poisoning defense
-  - Alon & Kamfonas (arXiv 2308.14132): PPL-based adversarial text detection with GPT-2
+  - RobustRAG (Xiang et al., arXiv 2405.15556): corpus-based isolation and aggregation
 """
 
-import math
+import numpy as np
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from src.config import ExperimentConfig
 
 
-class PPLDefenseFilter:
+class ConsistencyDefenseFilter:
     """
-    Perplexity-based binary classifier for detecting poisoned text chunks.
+    Corpus-consistency binary classifier for detecting poisoned text chunks.
 
-    GPT-2 small is loaded once at class level and shared across all instances.
-    Typical thresholds (tunable):
-        Defense A (pre-injection, strict) : global=80,  spike=120
-        Defense B (post-retrieval, lenient): global=100, spike=150
+    Compares the candidate chunk against the top-k most semantically similar
+    CLEAN chunks already in pgvector (is_original=True) and uses an LLM to
+    detect factual contradictions.
 
     Usage:
-        filter_a = PPLDefenseFilter.from_config(config, "pre_injection")
-        filter_b = PPLDefenseFilter.from_config(config, "post_retrieval")
+        conn = psycopg2.connect(...)
+        filter_a = ConsistencyDefenseFilter.from_config(config, conn)
         is_malicious, score = filter_a.predict(chunk_text)
     """
 
-    # Class-level cache: GPT-2 is loaded once and reused across all instances
-    _tokenizer = None
-    _model     = None
-
     def __init__(
         self,
-        global_ppl_threshold: float = 100.0,
-        spike_ppl_threshold:  float = 150.0,
-        window_size:          int   = 50,
-        stride:               int   = 25,
-        max_tokens:           int   = 512,
+        conn,
+        embedding_model: str,
+        llm_model:       str,
+        top_k_ref:       int = 5,
     ):
-        self.global_threshold = global_ppl_threshold
-        self.spike_threshold  = spike_ppl_threshold
-        self.window_size      = window_size
-        self.stride           = stride
-        self.max_tokens       = max_tokens
-        self._ensure_model()
-
-    # ── Model loading ─────────────────────────────────────────────────────────
-
-    @classmethod
-    def _ensure_model(cls) -> None:
-        """Lazy-load GPT-2 small on first use. Cached across all instances."""
-        if cls._model is not None:
-            return
-        from transformers import GPT2LMHeadModel, GPT2TokenizerFast
-        print("[DefenseFilter] Loading GPT-2 small for PPL computation...")
-        cls._tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
-        cls._model     = GPT2LMHeadModel.from_pretrained("gpt2")
-        cls._model.eval()
-        print("[DefenseFilter] GPT-2 ready.")
-
-    # ── PPL computation ───────────────────────────────────────────────────────
-
-    def _ppl_from_ids(self, input_ids) -> float:
-        """Compute PPL for a single tensor of token ids."""
-        import torch
-        with torch.no_grad():
-            outputs = self._model(input_ids, labels=input_ids)
-        return math.exp(outputs.loss.item())
-
-    def compute_global_ppl(self, text: str) -> float:
-        """Global PPL over the full chunk (truncated to max_tokens)."""
-        ids = self._tokenizer(
-            text,
-            return_tensors="pt",
-            truncation=True,
-            max_length=self.max_tokens,
-        ).input_ids
-        return self._ppl_from_ids(ids)
-
-    def compute_max_window_ppl(self, text: str) -> float:
-        """
-        Maximum PPL over sliding windows.
-        Detects local perplexity spikes at instruction-injection transition points.
-        """
-        ids = self._tokenizer(
-            text,
-            return_tensors="pt",
-            truncation=True,
-            max_length=self.max_tokens,
-        ).input_ids[0]
-
-        n = len(ids)
-        if n <= self.window_size:
-            return self._ppl_from_ids(ids.unsqueeze(0))
-
-        max_ppl = 0.0
-        for start in range(0, n - self.window_size + 1, self.stride):
-            window = ids[start : start + self.window_size].unsqueeze(0)
-            max_ppl = max(max_ppl, self._ppl_from_ids(window))
-        return max_ppl
+        self.conn            = conn
+        self.embedding_model = embedding_model
+        self.llm_model       = llm_model
+        self.top_k_ref       = top_k_ref
 
     # ── Public interface ──────────────────────────────────────────────────────
 
     def predict(self, chunk_text: str) -> tuple[bool, float]:
         """
-        Evaluate a chunk for malicious content via PPL anomaly detection.
+        Evaluate a chunk for malicious content via corpus consistency voting.
 
         Returns:
-            is_malicious (bool): True if either PPL signal exceeds its threshold.
-            anomaly_score (float): Normalized score in [0, 1].
-                - < 1.0: below threshold (not flagged)
-                - = 1.0: at or above threshold (flagged)
-                Score is capped at 1.0; raw excess is encoded in is_malicious.
+            is_malicious (bool): True if the LLM detects factual contradiction.
+            score (float): 1.0 if contradiction detected, 0.0 otherwise.
+                           0.5 if no reference chunks found (insufficient data).
         """
-        global_ppl   = self.compute_global_ppl(chunk_text)
-        max_win_ppl  = self.compute_max_window_ppl(chunk_text)
+        embedding = self._embed(chunk_text)
+        ref_chunks = self._retrieve_similar_clean(embedding)
 
-        global_ratio = global_ppl  / self.global_threshold
-        spike_ratio  = max_win_ppl / self.spike_threshold
-        raw          = max(global_ratio, spike_ratio)
+        if not ref_chunks:
+            return False, 0.5  # no reference available, cannot judge
 
-        is_malicious  = raw >= 1.0
-        anomaly_score = min(raw, 1.0)
-        return is_malicious, round(anomaly_score, 4)
+        contradiction = self._check_contradiction(chunk_text, ref_chunks)
+        score = 1.0 if contradiction else 0.0
+        return contradiction, score
+
+    # ── LLM contradiction check ───────────────────────────────────────────────
+
+    def _check_contradiction(self, chunk_text: str, ref_chunks: list[dict]) -> bool:
+        import ollama
+        refs = "\n\n".join(
+            f"[Reference {i+1}]:\n{c['document']}"
+            for i, c in enumerate(ref_chunks)
+        )
+        prompt = (
+            "You are a contract fact-checking assistant.\n\n"
+            f"Reference clauses from a verified clean contract database:\n{refs}\n\n"
+            f"New clause to evaluate:\n{chunk_text}\n\n"
+            "Does the new clause contradict any specific factual claims in the reference clauses? "
+            "Look for contradictions in: numbers, dates, monetary amounts, jurisdictions, "
+            "deadlines, party names, or legal terms.\n"
+            "Answer with only YES or NO."
+        )
+        resp = ollama.chat(
+            model=self.llm_model,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return "YES" in resp.message.content.strip().upper()
+
+    # ── DB retrieval ──────────────────────────────────────────────────────────
+
+    def _retrieve_similar_clean(self, embedding: list[float]) -> list[dict]:
+        """Find top-k most similar CLEAN chunks (is_original=True) from pgvector."""
+        vec = np.array(embedding)
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT chunk_id, document, 1 - (embedding <=> %s) AS similarity
+                FROM chunks
+                WHERE is_original = TRUE
+                ORDER BY embedding <=> %s
+                LIMIT %s
+                """,
+                (vec, vec, self.top_k_ref),
+            )
+            rows = cur.fetchall()
+        return [
+            {"chunk_id": r[0], "document": r[1], "similarity": float(r[2])}
+            for r in rows
+        ]
+
+    # ── Embedding ─────────────────────────────────────────────────────────────
+
+    def _embed(self, text: str) -> list[float]:
+        import ollama
+        resp = ollama.embed(model=self.embedding_model, input=text)
+        return resp.embeddings[0]
+
+    # ── Factory ───────────────────────────────────────────────────────────────
 
     @classmethod
-    def from_config(cls, config: "ExperimentConfig", point: str) -> "PPLDefenseFilter":
+    def from_config(cls, config: "ExperimentConfig", conn) -> "ConsistencyDefenseFilter":
         """
-        Instantiate from YAML config for a given defense point.
-
-        Args:
-            config: ExperimentConfig loaded from experiment YAML.
-            point:  'pre_injection'  → Defense A (strict, lower thresholds)
-                    'post_retrieval' → Defense B (lenient, higher thresholds)
+        Instantiate from YAML config.
+        Both Defense A (pre_injection) and Defense B (post_retrieval) use the same logic.
         """
         defense = getattr(config, "defense", {}) or {}
-        point_cfg = defense.get(point, {})
-        if not point_cfg:
-            raise ValueError(f"Unknown defense point: '{point}'. Use 'pre_injection' or 'post_retrieval'.")
         return cls(
-            global_ppl_threshold=point_cfg.get("global_ppl_threshold", 100.0),
-            spike_ppl_threshold=point_cfg.get("spike_ppl_threshold",  150.0),
-            window_size=defense.get("window_size", 50),
-            stride=defense.get("stride",      25),
-            max_tokens=defense.get("max_tokens",   512),
+            conn=conn,
+            embedding_model=config.embedding_model,
+            llm_model=defense.get("llm_model", getattr(config, "attacker_model", "gemma4:e4b")),
+            top_k_ref=int(defense.get("top_k_ref", 5)),
         )

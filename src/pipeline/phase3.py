@@ -4,7 +4,7 @@ Phase 3 — Retrieval + Post-Retrieval Defense (Defense Point B)
 流程（對 data/queries.json 每筆查詢）：
   1. bge-m3 embed query → pgvector cosine 檢索 top-max(k) chunks
   2. 記錄 raw top-k（計算 RSR）
-  3. Defense Filter B（PPL，post_retrieval 閾值）
+  3. Defense Filter B（語料庫一致性投票，比對 is_original=True chunks）
      - 惡意 → 物理 DELETE from pgvector + 從 context 移除
      - 乾淨 → 保留進入 sanitized context
   4. 寫出 retrieval_results.json（每 query × k 一筆）供 Phase 4 使用
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
 class Phase3Retriever:
     """
-    Retrieves top-k chunks from pgvector, applies Defense B (PPL filtering),
+    Retrieves top-k chunks from pgvector, applies Defense B (corpus consistency voting),
     physically DELETEs malicious chunks, and outputs sanitized context for Phase 4.
     Runs all k values in config.top_k in a single pass.
     """
@@ -47,11 +47,11 @@ class Phase3Retriever:
     ) -> None:
         queries = json.loads(Path(queries_path).read_text(encoding="utf-8"))
 
-        from src.defense.filter import PPLDefenseFilter
-        defense_b = PPLDefenseFilter.from_config(self.config, "post_retrieval")
-
         conn  = self._connect()
         max_k = max(self.config.top_k)
+
+        from src.defense.filter import ConsistencyDefenseFilter
+        defense_b = ConsistencyDefenseFilter.from_config(self.config, conn)
 
         all_results: list[dict] = []
         all_audit:   list[dict] = []
@@ -274,8 +274,9 @@ def _write_report(
         "",
         f"**Run time**: {_now_iso()}  ",
         f"**Config**: `configs/experiment_01.yaml`  ",
-        f"**Defense method**: PPL Filtering (GPT-2 small)  ",
-        f"**Thresholds (Defense B)**: global_ppl=100, spike_ppl=150  ",
+        f"**Defense method**: Corpus Consistency Voting (LLM-based contradiction detection)  ",
+        f"**Defense B LLM**: `{config.defense.get('llm_model', 'gemma4:e4b')}`  "
+        f"top_k_ref={config.defense.get('top_k_ref', 5)}  ",
         f"**Top-K values tested**: {k_values}  ",
         "",
         "---",
@@ -306,7 +307,7 @@ def _write_report(
         "## Notes",
         "",
         "- RSR measures attack strength (before defense); DBR-B measures defense effectiveness at B",
-        "- Stealth attacks are expected to have low DBR-B (low PPL by design)",
+        "- Stealth attacks alter key facts while maintaining semantic similarity; consistency voting targets this",
         "- Physical DELETE applied incrementally: earlier queries' deletions affect later queries",
         "- Retrieval results with sanitized context: `output/retrieval_results.json`",
         "- Per-chunk audit log: `output/audit_defense_b.jsonl`",
