@@ -99,7 +99,7 @@
 |------|------|------|
 | LLM 推論接口 | **Ollama** | 統一 REST API，模型名稱由 `configs/*.yaml` 控制，不寫死在程式碼中 |
 | Attacker | gemma4:e4b（量化） | Phase 1 批次完成後從 VRAM 卸載 |
-| Target | gemma4:31b（量化） | Phase 4 批次生成回答 |
+| Target | gemma4:26b（量化） | Phase 4 批次生成回答 |
 | Embedding | BAAI/bge-m3 | 本地部署，支援多語言，向量維度 1024 |
 | Vector DB | **Postgres + pgvector** | SQL 介面熟悉、原生支援 DELETE / metadata 過濾、HNSW 索引 |
 | 防禦方法論 | 候選：特徵 + XGBoost | 最終方法論待補（見 `defense_methodology.md`）；雙防禦點共用 |

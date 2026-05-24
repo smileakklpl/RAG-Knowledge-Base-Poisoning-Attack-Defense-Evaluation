@@ -101,7 +101,7 @@ sanitized_contexts.json   ──►   for query in all_queries:
   },
 
   "phase4": {
-    "target_model":        "gemma4:31b",
+    "target_model":        "gemma4:26b",
     "prompt_version":      "v1.0",
     "target_answer":       "According to the contract, 90 days written notice is required...",
     "latency_ms":          12345
@@ -135,7 +135,7 @@ sanitized_contexts.json   ──►   for query in all_queries:
 | 變數 | 實驗值 |
 |------|-------|
 | Poison Ratio | 1%、5%、10% |
-| Top-K | 3、5、10 |
+| Top-K | 9（Voting 3 組 × 3 chunks） |
 | 防禦設定 | 無防禦 / 僅 A / 僅 B / A + B |
 | 攻擊類型 | hijack、blocker、stealth（分開報告） |
 | Random Seed | 至少 3 個 |

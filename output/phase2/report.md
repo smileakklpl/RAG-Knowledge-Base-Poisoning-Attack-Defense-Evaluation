@@ -1,6 +1,6 @@
 # Phase 2 — Experiment Report
 
-**Run time**: 2026-05-22T12:30:27.697596+00:00  
+**Run time**: 2026-05-24T13:02:04.301534+00:00  
 **Config**: `configs/experiment_01.yaml`  
 **Defense method**: Corpus Consistency Voting (LLM-based contradiction detection)  
 **Defense A LLM**: `gemma4:e4b`  top_k_ref=5  
@@ -14,7 +14,7 @@
 | Item | Value |
 |------|-------|
 | Original chunks in DB (Phase 1) | 100 |
-| Poison chunks tested (Phase 2) | 5 |
+| Poison chunks tested (Phase 2) | 15 |
 | CDR test chunks | 20 |
 | Embedding model | bge-m3 |
 | Chunk size | 300 tokens / 50 overlap |
@@ -25,18 +25,18 @@
 
 | Metric | Value |
 |--------|-------|
-| Chunks inserted into pgvector | 2 |
-| Chunks blocked (not inserted) | 3 |
-| **DBR-A** (poison caught / total poison) | **60.00%** |
+| Chunks inserted into pgvector | 9 |
+| Chunks blocked (not inserted) | 6 |
+| **DBR-A** (poison caught / total poison) | **40.00%** |
 | **CDR-A** (clean wrongly blocked / CDR test n) | **5.00%** |
 
 ### Per-Attack-Type Breakdown
 
 | Attack Type | Total | Caught | DBR | Avg Score |
 |-------------|-------|--------|-----|-----------|
-| blocker | 1 | 0 | 0% | 0.000 |
-| hijack | 1 | 1 | 100% | 1.000 |
-| stealth | 3 | 2 | 67% | 0.667 |
+| blocker | 5 | 0 | 0% | 0.000 |
+| hijack | 5 | 3 | 60% | 0.600 |
+| stealth | 5 | 3 | 60% | 0.600 |
 
 ---
 

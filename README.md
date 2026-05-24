@@ -98,11 +98,11 @@ vector_db:
   host:     "localhost"
   database: "rag_poison"
 
-top_k: [5]                         # 檢索 top-k 候選
-n_clean_chunks:        100         # Phase 1 預載至 DB 的乾淨 CUAD chunks（1=快速測試）
-n_poison_chunks:       5           # Phase 2 注入的毒化 chunks（null=全部使用）
+top_k: [9]                         # 檢索 top-k 候選（Voting 3組 × 3 chunks）
+n_clean_chunks:        200         # Phase 1 預載至 DB 的乾淨 CUAD chunks
+n_poison_chunks:       30          # Phase 2 注入的毒化 chunks（10 queries × 3 types）
 n_retrieved_per_query: 3           # 攻擊者每個 query 從 DB 撈幾個 chunks 做為攻擊基底
-n_cdr_chunks:          20          # Phase 2 CDR 測試用的額外乾淨 chunks
+n_cdr_chunks:          40          # Phase 2 CDR 測試用的額外乾淨 chunks
 seed: 42                           # 隨機種子
 ```
 
@@ -203,7 +203,7 @@ seed: 42                           # 隨機種子
                      人工 JSON 標註 → ASR
 ```
 
-具體偵測方法見 `docs/defense_methodology.md`：**語料庫一致性投票**（LLM 矛盾偵測）+ **可回答性檢查**（Defense B 專用，針對 Blocker 攻擊）。
+具體偵測方法見 `docs/defense_methodology.md`：**語料庫一致性投票**（LLM 矛盾偵測）+ **離題偵測**（Defense B Stage 2，針對 Blocker 攻擊）。
 
 ---
 
@@ -234,7 +234,7 @@ src/
 │   ├── phase4.py                   # 目標 LLM 生成（已完成）
 │   └── phase5.py                   # 人工標註核心邏輯（已完成）
 └── defense/
-    └── filter.py                   # ConsistencyDefenseFilter：矛盾偵測 + 可回答性檢查
+    └── filter.py                   # ConsistencyDefenseFilter：矛盾偵測 + 離題偵測
 
 tools/
 └── annotate.py                     # Phase 5 CLI 入口（import src.pipeline.phase5）
@@ -281,7 +281,7 @@ docs/
 - **LLM 推論**：Ollama（統一接口）
 - **嵌入模型**：bge-m3（語義向量化）
 - **向量資料庫**：Postgres + pgvector（HNSW / IVFFlat 索引）
-- **防禦分類**：語料庫一致性投票 + 可回答性檢查（LLM-based，見 `docs/defense_methodology.md`）
+- **防禦分類**：語料庫一致性投票 + 離題偵測（LLM-based，見 `docs/defense_methodology.md`）
 - **評估方式**：人工 JSON 標註（無 Judge LLM）
 - **執行框架**：原生 Python + Ollama SDK 0.4+
 
@@ -298,7 +298,7 @@ docs/
 - **`phase3_trigger_retrieval.md`** — Phase 3 檢索 + 防禦點 B
 - **`phase4_target_generation.md`** — Phase 4 目標 LLM 生成回答
 - **`phase5_human_evaluation.md`** — Phase 5 人工評估流程與標註格式
-- **`defense_methodology.md`** — 防禦方法論：Defense A（矛盾偵測）、Defense B（矛盾偵測 + 可回答性檢查）
+- **`defense_methodology.md`** — 防禦方法論：Defense A（矛盾偵測）、Defense B（矛盾偵測 + 離題偵測）
 
 ---
 
@@ -310,7 +310,7 @@ docs/
 - [x] **Docker 環境** — `docker-compose.yml` + `db/init.sql`（pgvector schema 自動初始化）
 - [x] **防禦方法論** — `src/defense/filter.py` ConsistencyDefenseFilter 實作完成
   - Defense A：LLM 矛盾偵測，比對 top_k_ref 筆乾淨 chunks（is_original=TRUE）
-  - Defense B：矛盾偵測（Stage 1）+ 可回答性檢查（Stage 2，專對 Blocker）
+  - Defense B：矛盾偵測（Stage 1）+ 離題偵測（Stage 2，專對 Blocker）
   - 文獻：PoisonedRAG (USENIX Security 2025)
 - [x] **Phase 1** — 重構為「撈出 → 修改」攻擊情境
   - Step A：`n_clean_chunks` 筆 CUAD chunks 預載至 pgvector（`is_original=True`）
@@ -322,12 +322,12 @@ docs/
   - Defense A（矛盾偵測）→ 阻擋者不入庫；通過者以 `is_original=False` 寫入
   - CDR 測試：額外載入 `n_cdr_chunks` 筆 CUAD chunks（seed+1，非 DB 原始集合）量測誤攔率
 - [x] **Phase 3** — `src/pipeline/phase3.py` 實作完成，執行驗證通過（31s）
-  - bge-m3 embed query → pgvector cosine top-k，跑三個 k 值（3/5/10）
-  - Defense B（矛盾偵測 Stage 1 + 可回答性檢查 Stage 2）→ 物理 DELETE 惡意 chunk
-  - Stage 2 針對 Blocker 攻擊：chunk 無法回答 query 時阻擋（score=0.7）
+  - bge-m3 embed query → pgvector cosine top-k（k=9）
+  - Defense B（矛盾偵測 Stage 1 + 離題偵測 Stage 2）→ 物理 DELETE 惡意 chunk
+  - Stage 2 針對 Blocker 攻擊：chunk 明顯來自不同法律領域時阻擋（score=0.7）
 - [x] **Phase 4** — `src/pipeline/phase4.py` 實作完成，執行驗證通過（~23min）
   - Sanitized context + RAG prompt v1.0 → `gemma4:26b` 批次生成
-  - 15 筆 entry（5 queries × 3 k 值），全部含毒化 context（防禦無效所致）
+  - 30 筆 entry（10 queries × 3 k 值），含毒化 context 比例依防禦效果而定
   - 初步觀察：q02（適用法律）完全中毒，q01（終止天數）部分中毒
 - [x] **Phase 5 標註工具** — `src/pipeline/phase5.py` 核心邏輯 + `tools/annotate.py` CLI 入口
   - 逐筆顯示 query / 實際注入文字（Phase 1） / model_answer（Phase 4）

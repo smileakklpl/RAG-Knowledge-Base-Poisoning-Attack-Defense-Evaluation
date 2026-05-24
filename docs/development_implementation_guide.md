@@ -44,10 +44,10 @@ class LLMClient:
 ```yaml
 # configs/experiment_01.yaml
 attacker_model:  "gemma4:e4b"
-target_model:    "gemma4:31b"
+target_model:    "gemma4:26b"
 embedding_model: "bge-m3"
 evaluation_mode: "human"
-top_k: [3, 5, 10]
+top_k: [9]
 poison_ratio: [0.01, 0.05, 0.10]
 seed: 42
 ```
@@ -227,7 +227,7 @@ for query in queries:
 4. pgvector（本地）：
    - Postgres + pgvector 走 5432 port，吃 RAM 與 disk，不吃 VRAM。
 5. Phase 4 Target（本地）：
-   - `gemma4:31b` 量化版，25-30GB VRAM。批次完成所有 query。
+   - `gemma4:26b` 量化版，25-30GB VRAM。批次完成所有 query。
 6. Phase 5 評估（人工）：
    - 不再呼叫任何模型，標註者用文字編輯器或簡易 CLI 工具即可。
 
@@ -240,7 +240,7 @@ for query in queries:
 ## 建議模型角色分工
 
 1. Attacker（本地）：`gemma4:e4b` 量化模型。
-2. Target（本地）：`gemma4:31b` 量化模型。
+2. Target（本地）：`gemma4:26b` 量化模型。
 3. Embedding（本地）：bge-m3。
 4. Defense（本地，CPU）：候選 XGBoost。
 5. 評估：**人工 JSON 標註**，無模型成本。

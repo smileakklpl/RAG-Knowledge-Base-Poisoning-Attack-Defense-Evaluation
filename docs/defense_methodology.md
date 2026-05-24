@@ -1,8 +1,8 @@
 # 防禦方法論
 
-> **核心策略**：以乾淨語料庫為基準，透過 LLM 偵測事實矛盾與可回答性，阻擋惡意 chunks。  
+> **核心策略**：以乾淨語料庫為基準，透過 LLM 偵測事實矛盾與離題注入，阻擋惡意 chunks。  
 > **防禦點 A**：入庫前矛盾偵測（Phase 2）  
-> **防禦點 B**：檢索後雙重檢查——矛盾偵測 + 可回答性檢查（Phase 3）  
+> **防禦點 B**：檢索後雙重檢查——矛盾偵測 + 離題偵測（Phase 3）  
 > **研究目標**：提升 DBR（Detection/Block Rate），降低 CDR（Clean Drop Rate）
 
 ---
@@ -12,7 +12,7 @@
 | 防禦點 | 階段 | 方法 | 觸發條件 | 處置 |
 |--------|------|------|---------|------|
 | **A** | Phase 2 入庫前 | 矛盾偵測 | 新 chunk 與乾淨語料存在事實矛盾 | 阻擋入庫 |
-| **B** | Phase 3 檢索後 | 矛盾偵測 + 可回答性檢查 | 矛盾 **或** 無法回答 query | 物理 DELETE + 移出 context |
+| **B** | Phase 3 檢索後 | 矛盾偵測 + 離題偵測 | 矛盾 **或** 明顯來自不同法律領域 | 物理 DELETE + 移出 context |
 
 ---
 
@@ -125,9 +125,9 @@ src/defense/filter.py
         ↓
 [pgvector DB]      ← 只有通過 A 的 chunks 進入
         ↓
-[Phase 3 檢索後]   → 防禦點 B（矛盾偵測 + 可回答性檢查）
+[Phase 3 檢索後]   → 防禦點 B（矛盾偵測 + 離題偵測）
                        → 矛盾 (score=1.0) → 物理 DELETE
-                       → 不可回答 (score=0.7) → 物理 DELETE
+                       → 離題 (score=0.7) → 物理 DELETE
                        → 通過 → 進入 sanitized context
         ↓
 [Phase 4 生成]     ← 只有通過 A + B 的乾淨 chunks
@@ -143,7 +143,7 @@ src/defense/filter.py
 | Stealth | ⚠️ 部分有效（細微矛盾，LLM 可能漏判） | ⚠️ Stage 1 部分有效 | 中 |
 | Blocker | ❌ 無法偵測 | ⚠️ Stage 2 有效（跨領域注入），同領域 Blocker 仍有盲區 | 中 |
 
-> **實驗結果（experiment_01，gemma4:e4b）**：Defense A DBR=60% / CDR=5%；Defense B（舊版可回答性）DBR=0% / CDR=91.3%；改用離題偵測後結果待重跑確認。
+> **實驗結果（experiment_01，5 queries × 3 types，gemma4:e4b）**：Defense A DBR=40% / CDR-A=5%（blocker=0%, hijack=60%, stealth=60%）；Defense B（離題偵測）DBR=66.67% / CDR-B=43.48%。目前擴充至 10 queries × 3 types（30 poison chunks）與 200 筆乾淨語料，重跑實驗中。
 
 ---
 

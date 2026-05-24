@@ -29,10 +29,10 @@ seed: 42                           # Random seed for reproducibility
 
 # Clean corpus size for Phase 2
 # Set small (1-5) for fast pipeline testing; scale to 100-500 for final paper runs
-n_clean_chunks: 100          # Phase 1 預載至 DB 的乾淨 CUAD chunks 數量
-n_poison_chunks: 5            # Phase 2 最多注入幾筆 poison chunks（None = 全部）
+n_clean_chunks: 200          # Phase 1 預載至 DB 的乾淨 CUAD chunks 數量
+n_poison_chunks: 30           # Phase 2 最多注入幾筆 poison chunks（None = 全部）
 n_retrieved_per_query: 3      # 攻擊者每個 query 從 DB 撈幾個 chunks 做為攻擊基底
-n_cdr_chunks: 20              # Phase 2 CDR 測試用的額外乾淨 chunks 數量
+n_cdr_chunks: 40              # Phase 2 CDR 測試用的額外乾淨 chunks 數量
 
 # Phase 1 (Attack Generation) agent thresholds
 max_iter:          4                # Max iterations per query

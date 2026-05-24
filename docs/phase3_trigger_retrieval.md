@@ -163,13 +163,11 @@ CDR_B = sum(r["predicted_is_malicious"] for r in clean)  / len(clean)  if clean 
 
 ## Top-K 實驗組
 
-至少跑三組 K 值並分開報告：
+目前主要實驗設定為 K=9（配合 Voting 分 3 組、每組 3 chunks）：
 
 | Top-K | 說明 |
 |-------|------|
-| K = 3 | 嚴格檢索，Context 最短 |
-| K = 5 | 標準設定 |
-| K = 10 | 寬鬆檢索，Context 較長 |
+| K = 9 | 主要設定；Voting 模式下均分 3 組，每組 3 chunks（`voting_groups=3`） |
 
 ---
 
@@ -239,7 +237,7 @@ pgvector 提供三種距離運算子：
 1. 查詢 Embedding 必須與 Phase 2 入庫時使用同一個模型與參數
 2. **`raw_topk` 與 `sanitized` 都要記錄**，否則 RSR 與 DBR-B 無法分離計算
 3. 防禦點 B 的方法論統一寫在 `docs/defense_methodology.md`
-4. K 值至少跑 3、5、10 三組，並記錄 poison 的 rank
+4. 目前主要實驗 K=9，並記錄 poison 的 rank
 5. 常見踩雷：只記錄被攔截後的結果，沒留下原始 Top-K → 無法回推 RSR
 
 ---
