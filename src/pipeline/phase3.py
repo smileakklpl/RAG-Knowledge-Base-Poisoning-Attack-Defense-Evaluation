@@ -57,15 +57,21 @@ class Phase3Retriever:
         all_audit:   list[dict] = []
 
         for query in tqdm(queries, desc="  Retrieve + Defense-B", unit="query"):
+            tqdm.write(f"\n  [Query] {query['id']}: {query['text'][:80].strip()!r}")
             query_vec  = self._embed(query["text"])
             raw_chunks = self._retrieve(conn, query_vec, max_k)
+            tqdm.write(f"    retrieved {len(raw_chunks)} chunks (top-{max_k})")
 
             # Defense B: score every retrieved chunk, collect deletes
             blocked_ids:   set[str]              = set()
             chunk_scores:  dict[str, tuple]      = {}
 
             for chunk in raw_chunks:
-                is_malicious, score = defense_b.predict(chunk["document"])
+                tqdm.write(
+                    f"    [chunk] rank={chunk['rank']}  {chunk['chunk_id']}"
+                    f"  poison={chunk['is_poison']}  sim={chunk['similarity']:.3f}"
+                )
+                is_malicious, score = defense_b.predict(chunk["document"], query_text=query["text"])
                 chunk_scores[chunk["chunk_id"]] = (is_malicious, score)
 
                 all_audit.append({

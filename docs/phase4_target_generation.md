@@ -2,7 +2,7 @@
 
 ## 目標
 
-Target LLM 接收 Phase 3 輸出的 **sanitized context**（已過防禦點 B），對 Target Query 產生回答。本階段純粹為 LLM 推論，不執行任何防禦或評估。
+Target LLM 接收 Phase 3 輸出的 **sanitized context**（已過防禦點 B），對 Target Query 產生回答。本階段負責答案生成，支援兩種生成模式（`standard` 與 `voting`），不執行額外的 chunk 過濾。
 
 ---
 
@@ -16,9 +16,33 @@ Target LLM 接收 Phase 3 輸出的 **sanitized context**（已過防禦點 B）
 
 ---
 
+## 生成模式
+
+由 `configs/*.yaml` 的 `generation.defense_mode` 欄位控制：
+
+| 模式 | 說明 | 適用場景 |
+|------|------|---------|
+| `standard` | 所有 sanitized chunks 串接後一次生成 | 基準線對照 |
+| `voting` | RobustRAG Keyword-based Aggregation | 主要實驗設定 |
+
+### Voting 模式（RobustRAG，Xiang et al. 2024）
+
+```
+top-k chunks → 均勻切成 g 組（round-robin）
+    ↓
+每組各自獨立推論 → g 個 isolated responses
+    ↓
+抽取關鍵字，投票保留 ≥ ceil(α × g) 組同意的詞
+    ↓
+將 g 個 responses 整合再推論 → 最終答案
+  （衝突資訊回報為衝突，不接受少數毒值）
+```
+
+> **這不是防線**：Voting 在**答案層**提供容錯，而 Defense A / B 在 chunk 層過濾。兩者獨立運作，Voting 對 Defense B 未攔截的毒 chunk 能提供額外保護。
+
 ## Target LLM
 
-由 `configs/*.yaml` 的 `target_model` 欄位指定，本專題採用 `gemma4:31b`（量化版）。
+由 `configs/*.yaml` 的 `target_model` 欄位指定，本專題採用 `gemma4:26b`（量化版）。
 
 ### Prompt 結構（固定版本化）
 

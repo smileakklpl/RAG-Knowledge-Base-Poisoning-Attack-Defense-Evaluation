@@ -203,7 +203,7 @@ seed: 42                           # 隨機種子
                      人工 JSON 標註 → ASR
 ```
 
-具體偵測方法見 `docs/defense_methodology.md`：**PPL Filtering**（GPT-2 global perplexity + sliding window spike），已確定採用。
+具體偵測方法見 `docs/defense_methodology.md`：**語料庫一致性投票**（LLM 矛盾偵測）+ **可回答性檢查**（Defense B 專用，針對 Blocker 攻擊）。
 
 ---
 
@@ -234,7 +234,7 @@ src/
 │   ├── phase4.py                   # 目標 LLM 生成（已完成）
 │   └── phase5.py                   # 人工標註核心邏輯（已完成）
 └── defense/
-    └── filter.py                   # PPLDefenseFilter：GPT-2 global PPL + window spike（已實作）
+    └── filter.py                   # ConsistencyDefenseFilter：矛盾偵測 + 可回答性檢查
 
 tools/
 └── annotate.py                     # Phase 5 CLI 入口（import src.pipeline.phase5）
@@ -281,7 +281,7 @@ docs/
 - **LLM 推論**：Ollama（統一接口）
 - **嵌入模型**：bge-m3（語義向量化）
 - **向量資料庫**：Postgres + pgvector（HNSW / IVFFlat 索引）
-- **防禦分類**：PPL Filtering（GPT-2 global PPL + sliding window spike，見 `docs/defense_methodology.md`）
+- **防禦分類**：語料庫一致性投票 + 可回答性檢查（LLM-based，見 `docs/defense_methodology.md`）
 - **評估方式**：人工 JSON 標註（無 Judge LLM）
 - **執行框架**：原生 Python + Ollama SDK 0.4+
 
@@ -298,7 +298,7 @@ docs/
 - **`phase3_trigger_retrieval.md`** — Phase 3 檢索 + 防禦點 B
 - **`phase4_target_generation.md`** — Phase 4 目標 LLM 生成回答
 - **`phase5_human_evaluation.md`** — Phase 5 人工評估流程與標註格式
-- **`defense_methodology.md`** — 防禦方法論候選方案（兩個防禦點共用，最終方法待定）
+- **`defense_methodology.md`** — 防禦方法論：Defense A（矛盾偵測）、Defense B（矛盾偵測 + 可回答性檢查）
 
 ---
 
@@ -308,9 +308,10 @@ docs/
 
 - [x] **管線骨架** — `main.py` 五階段 Orchestrator（`--phase` / `--from-phase` / `--force`）
 - [x] **Docker 環境** — `docker-compose.yml` + `db/init.sql`（pgvector schema 自動初始化）
-- [x] **防禦方法論** — `src/defense/filter.py` PPL Filtering 實作完成
-  - GPT-2 small（HuggingFace）計算 global PPL + sliding window spike
-  - 文獻：RAGuard (IEEE BigData 2025)、Alon & Kamfonas (arXiv 2308.14132)
+- [x] **防禦方法論** — `src/defense/filter.py` ConsistencyDefenseFilter 實作完成
+  - Defense A：LLM 矛盾偵測，比對 top_k_ref 筆乾淨 chunks（is_original=TRUE）
+  - Defense B：矛盾偵測（Stage 1）+ 可回答性檢查（Stage 2，專對 Blocker）
+  - 文獻：PoisonedRAG (USENIX Security 2025)
 - [x] **Phase 1** — 重構為「撈出 → 修改」攻擊情境
   - Step A：`n_clean_chunks` 筆 CUAD chunks 預載至 pgvector（`is_original=True`）
   - Step B：對每個 query，從 DB 撈出 top-`n_retrieved_per_query` 個最相關的 original chunk
@@ -318,12 +319,12 @@ docs/
   - `PoisonChunk` 新增 `original_chunk_id` / `original_chunk_text`，供 Phase 2 審計對照
 - [x] **Phase 2** — 重構為「注入嘗試 + 防禦點 A」
   - DB 已預載乾淨 originals（Phase 1 完成），Phase 2 不再載入 CUAD
-  - Defense Filter A（PPL，global=80 / spike=120）→ 通過者以 `is_original=False` 寫入
+  - Defense A（矛盾偵測）→ 阻擋者不入庫；通過者以 `is_original=False` 寫入
   - CDR 測試：額外載入 `n_cdr_chunks` 筆 CUAD chunks（seed+1，非 DB 原始集合）量測誤攔率
 - [x] **Phase 3** — `src/pipeline/phase3.py` 實作完成，執行驗證通過（31s）
   - bge-m3 embed query → pgvector cosine top-k，跑三個 k 值（3/5/10）
-  - Defense Filter B（PPL，global=100 / spike=150）→ 物理 DELETE 惡意 chunk
-  - 測試結果：RSR=100%（所有查詢命中 poison chunk），DBR-B=0%（PPL 對本實驗完全無效，符合文獻預期）
+  - Defense B（矛盾偵測 Stage 1 + 可回答性檢查 Stage 2）→ 物理 DELETE 惡意 chunk
+  - Stage 2 針對 Blocker 攻擊：chunk 無法回答 query 時阻擋（score=0.7）
 - [x] **Phase 4** — `src/pipeline/phase4.py` 實作完成，執行驗證通過（~23min）
   - Sanitized context + RAG prompt v1.0 → `gemma4:26b` 批次生成
   - 15 筆 entry（5 queries × 3 k 值），全部含毒化 context（防禦無效所致）

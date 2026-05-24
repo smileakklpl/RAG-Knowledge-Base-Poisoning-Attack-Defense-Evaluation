@@ -1,18 +1,23 @@
 """
 defense/filter.py — Corpus Consistency Defense (Defense Point A & B)
 
-Method: LLM-based factual contradiction detection against the clean corpus.
+Defense A (pre-injection, Phase 2) — contradiction check only:
+  1. Embed the chunk → retrieve top-k similar CLEAN chunks (is_original=True)
+  2. LLM: does the chunk contradict factual claims in the references?
+  3. Contradiction → BLOCK (score=1.0)
 
-For each chunk to evaluate:
-  1. Embed the chunk and retrieve top-k semantically similar CLEAN chunks (is_original=True) from DB
-  2. Ask the LLM (attacker model) whether the chunk contradicts any factual claims in those references
-  3. Contradiction detected → is_malicious=True, score=1.0
+Defense B (post-retrieval, Phase 3) — dual check:
+  Stage 1: same contradiction check as A (catches Hijack / Stealth)
+  Stage 2: if not contradicted, off-topic detection against the query
+             "Is this chunk clearly from a completely different legal domain than [query]?"
+             Clearly off-topic → BLOCK (score=0.7)  ← catches Blocker
+  Both pass → score=0.0, allow
 
-This catches Stealth attacks that fool PPL-based filters by maintaining natural language
-while silently altering key facts (numbers, dates, jurisdictions, amounts).
-
-References:
-  - RobustRAG (Xiang et al., arXiv 2405.15556): corpus-based isolation and aggregation
+Score semantics:
+  1.0  factual contradiction detected (Hijack / Stealth)
+  0.7  chunk is clearly off-topic relative to the query domain (Blocker)
+  0.5  no clean reference chunks found (insufficient data, do not block)
+  0.0  clean
 """
 
 import numpy as np
@@ -24,16 +29,18 @@ if TYPE_CHECKING:
 
 class ConsistencyDefenseFilter:
     """
-    Corpus-consistency binary classifier for detecting poisoned text chunks.
+    Corpus-consistency classifier for detecting poisoned text chunks.
 
-    Compares the candidate chunk against the top-k most semantically similar
-    CLEAN chunks already in pgvector (is_original=True) and uses an LLM to
-    detect factual contradictions.
+    Defense A (query_text=None): contradiction check only.
+    Defense B (query_text provided): contradiction check + off-topic detection.
 
     Usage:
         conn = psycopg2.connect(...)
-        filter_a = ConsistencyDefenseFilter.from_config(config, conn)
-        is_malicious, score = filter_a.predict(chunk_text)
+        flt = ConsistencyDefenseFilter.from_config(config, conn)
+        # Defense A
+        is_malicious, score = flt.predict(chunk_text)
+        # Defense B
+        is_malicious, score = flt.predict(chunk_text, query_text=query)
     """
 
     def __init__(
@@ -50,24 +57,42 @@ class ConsistencyDefenseFilter:
 
     # ── Public interface ──────────────────────────────────────────────────────
 
-    def predict(self, chunk_text: str) -> tuple[bool, float]:
+    def predict(
+        self,
+        chunk_text: str,
+        query_text: str | None = None,
+    ) -> tuple[bool, float]:
         """
-        Evaluate a chunk for malicious content via corpus consistency voting.
+        Evaluate a chunk for malicious content.
+
+        Args:
+            chunk_text: The chunk to evaluate.
+            query_text: The retrieval query (Defense B only). When provided,
+                        adds an answerability check to catch Blocker attacks.
 
         Returns:
-            is_malicious (bool): True if the LLM detects factual contradiction.
-            score (float): 1.0 if contradiction detected, 0.0 otherwise.
-                           0.5 if no reference chunks found (insufficient data).
+            is_malicious (bool), score (float):
+              1.0  factual contradiction → BLOCK (Hijack / Stealth)
+              0.7  clearly off-topic to query domain → BLOCK (Blocker)
+              0.5  no clean refs available, cannot judge → allow
+              0.0  passes all checks → allow
         """
-        embedding = self._embed(chunk_text)
+        embedding  = self._embed(chunk_text)
         ref_chunks = self._retrieve_similar_clean(embedding)
 
         if not ref_chunks:
             return False, 0.5  # no reference available, cannot judge
 
-        contradiction = self._check_contradiction(chunk_text, ref_chunks)
-        score = 1.0 if contradiction else 0.0
-        return contradiction, score
+        # Stage 1: factual contradiction check (Defense A & B)
+        if self._check_contradiction(chunk_text, ref_chunks):
+            return True, 1.0
+
+        # Stage 2: off-topic detection (Defense B only, catches Blocker)
+        if query_text is not None:
+            if self._check_off_topic(chunk_text, query_text):
+                return True, 0.7
+
+        return False, 0.0
 
     # ── LLM contradiction check ───────────────────────────────────────────────
 
@@ -86,11 +111,58 @@ class ConsistencyDefenseFilter:
             "deadlines, party names, or legal terms.\n"
             "Answer with only YES or NO."
         )
+        print(
+            f"      [LLM] contradiction check vs {len(ref_chunks)} clean refs"
+            f" | chunk: {chunk_text[:60].strip()!r}...",
+            flush=True,
+        )
         resp = ollama.chat(
             model=self.llm_model,
             messages=[{"role": "user", "content": prompt}],
         )
-        return "YES" in resp.message.content.strip().upper()
+        result = "YES" in resp.message.content.strip().upper()
+        label  = "BLOCK" if result else "pass"
+        print(f"      [LLM] -> {label}  (raw: {resp.message.content.strip()[:20]!r})", flush=True)
+        return result
+
+    # ── LLM off-topic detection (Defense B / Blocker detection) ─────────────
+
+    def _check_off_topic(self, chunk_text: str, query_text: str) -> bool:
+        """
+        Returns True if the chunk is clearly from a different legal domain than
+        the query (i.e. it is off-topic and should be blocked as a Blocker).
+        Returns False if the chunk is in the same or related legal area.
+
+        Blocker attacks inject high-similarity chunks from an unrelated legal
+        domain. Asking "is this chunk off-topic?" is more lenient than asking
+        "can this chunk answer the query?" — it avoids blocking legitimate
+        chunks that are on-topic but do not contain the exact answer.
+        """
+        import ollama
+        prompt = (
+            "You are a contract analysis assistant.\n\n"
+            f"Question: {query_text}\n\n"
+            f"Contract clause:\n{chunk_text}\n\n"
+            "Is this clause clearly about a COMPLETELY DIFFERENT legal topic than the question? "
+            "Answer YES only if the clause deals with an entirely different legal domain "
+            "(e.g. a confidentiality clause when asked about termination notice, "
+            "or a payment clause when asked about governing jurisdiction). "
+            "Answer NO if the clause is about the same or a closely related legal area, "
+            "even if it does not directly state the answer. "
+            "Answer with only YES or NO."
+        )
+        print(
+            f"      [LLM] off-topic check | query: {query_text[:60].strip()!r}",
+            flush=True,
+        )
+        resp = ollama.chat(
+            model=self.llm_model,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        off_topic = "YES" in resp.message.content.strip().upper()
+        label = "off-topic -> BLOCK" if off_topic else "on-topic"
+        print(f"      [LLM] -> {label}  (raw: {resp.message.content.strip()[:20]!r})", flush=True)
+        return off_topic
 
     # ── DB retrieval ──────────────────────────────────────────────────────────
 

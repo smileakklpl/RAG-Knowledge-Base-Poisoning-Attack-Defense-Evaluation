@@ -59,6 +59,10 @@ class Phase2Injector:
         inserted = blocked = 0
 
         for chunk in tqdm(poison_chunks, desc="  Defense-A (poison)", unit="chunk"):
+            tqdm.write(
+                f"    [chunk] {chunk['chunk_id']}  attack={chunk.get('attack_type','?')}"
+                f"  text: {chunk['document'][:60].strip()!r}..."
+            )
             is_malicious, score = defense_a.predict(chunk["document"])
             poison_records.append({
                 "chunk_id":               chunk["chunk_id"],
