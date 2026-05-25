@@ -12,7 +12,7 @@
 |------|------|
 | **輸入** | `data/queries.json` 中的 Target Queries + Phase 2 的 pgvector 資料表 |
 | **輸出** | Sanitized Top-K Context（送入 Phase 4 的 Target LLM）+ 檢索日誌 |
-| **執行約束** | 不需要 LLM，只需 Embedding 查詢向量化 + pgvector 相似度檢索 + 防禦器 CPU 推論 |
+| **執行約束** | 需要 Embedding Model（bge-m3）+ LLM（gemma4:e4b，Defense B 矛盾偵測 + 離題偵測）；Ollama 本地推論 |
 
 ---
 
@@ -57,9 +57,9 @@ Raw Top-K Chunks  ──────────►  記錄 RSR（防禦前的�
 
 ---
 
-## 處置策略：標記 + 物理 DELETE + 重寫資料庫
+## 處置策略：標記 + 物理 DELETE
 
-防禦點 B 與防禦點 A **採用相同策略**：偵測到惡意 chunk 後，先標記再物理 DELETE，確保資料庫中最終只保留乾淨文本。
+防禦點 B 採**物理 DELETE**策略（與防禦點 A 不同：A 是拒絕注入從不寫入 DB；B 是 chunk 已注入 DB，偵測到惡意後再從 DB 實際刪除）：
 
 ```python
 def retrieve_with_defense_b(query, k, query_id):
@@ -98,7 +98,7 @@ def retrieve_with_defense_b(query, k, query_id):
 ### 標記 + DELETE + 重寫的必要性
 
 - **資料庫一致性**：防禦點 A 漏網的惡意 chunk 在 B 命中後應立即清除，避免後續查詢再次檢索到
-- **與防禦點 A 對稱**：兩個防禦點都執行物理 DELETE，確保最終資料庫狀態一致（只含乾淨文本）
+- **與防禦點 A 互補**：A 拒絕可疑 chunk 寫入（入庫前攔截），B 對 A 漏網後已進入 DB 的惡意 chunk 執行物理 DELETE（入庫後清除）；兩點合作確保最終資料庫只保留乾淨文本
 - **audit_log 保存審計依據**：DELETE 前先落盤 audit_log，不會丟失「被刪了什麼」的記錄
 - **ablation 可重現性**：實驗開始前從備份重新載入 CUAD clean corpus，各 ablation 配置均從同一基準啟動
 
@@ -131,12 +131,12 @@ CDR-B = (predicted=True & truth=False 的 chunk 數) / (truth=False 的 chunk �
 
 衡量進入 Top-K 的乾淨 chunk 中，被防禦點 B 錯誤刪除的比例（傷害可用性）。
 
-兩個指標均從 `output/audit_defense_b.jsonl` 計算：
+兩個指標均從 `output/phase3/audit_defense_b.jsonl` 計算：
 
 ```python
 import json
 
-records = [json.loads(l) for l in open("output/audit_defense_b.jsonl")]
+records = [json.loads(l) for l in open("output/phase3/audit_defense_b.jsonl")]
 
 # 以 chunk 為單位去重（同一 chunk 可能出現在多筆 query 的 Top-K 中）
 seen = {}
@@ -239,6 +239,29 @@ pgvector 提供三種距離運算子：
 3. 防禦點 B 的方法論統一寫在 `docs/defense_methodology.md`
 4. 目前主要實驗 K=9，並記錄 poison 的 rank
 5. 常見踩雷：只記錄被攔截後的結果，沒留下原始 Top-K → 無法回推 RSR
+
+---
+
+## 實驗結果（experiment_01）
+
+| 指標 | 值 |
+|------|---|
+| Top-K | 9 |
+| Queries | 10 |
+| **RSR**（防禦前命中率） | **90%**（9/10 queries 的 top-9 含毒 chunk） |
+| Unique chunks evaluated | 72 |
+| Poison chunks in top-k | 15 |
+| **DBR-B**（毒 chunk 攔截率） | **80%**（12/15） |
+| **CDR-B**（乾淨 chunk 誤攔率） | **42.11%**（24/57） |
+
+| 攻擊類型 | Queries Hit (RSR) | In Top-K | Caught | DBR-B | Avg Score |
+|---------|-------------------|----------|--------|-------|-----------|
+| blocker | 6/10 (60%)        | 8        | 6      | 75%   | 0.563 |
+| hijack  | 4/10 (40%)        | 3        | 2      | 67%   | 0.667 |
+| stealth | 5/10 (50%)        | 4        | 4      | 100%  | 1.000 |
+
+> CDR-B 偏高（42.11%）：Stage 2 離題偵測在查詢領域邊界模糊時容易誤判合法條款，為後續改進重點。  
+> Stealth 100% 被 Stage 1 矛盾偵測清除；Blocker 依賴 Stage 2，75% 被攔截。
 
 ---
 

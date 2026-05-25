@@ -143,7 +143,10 @@ src/defense/filter.py
 | Stealth | ⚠️ 部分有效（細微矛盾，LLM 可能漏判） | ⚠️ Stage 1 部分有效 | 中 |
 | Blocker | ❌ 無法偵測 | ⚠️ Stage 2 有效（跨領域注入），同領域 Blocker 仍有盲區 | 中 |
 
-> **實驗結果（experiment_01，5 queries × 3 types，gemma4:e4b）**：Defense A DBR=40% / CDR-A=5%（blocker=0%, hijack=60%, stealth=60%）；Defense B（離題偵測）DBR=66.67% / CDR-B=43.48%。目前擴充至 10 queries × 3 types（30 poison chunks）與 200 筆乾淨語料，重跑實驗中。
+> **實驗結果（experiment_01，10 queries × 3 types = 30 poison，200 clean，40 CDR，gemma4:e4b）**：  
+> Defense A — DBR-A=**50%** / CDR-A=**5%**（blocker=20%、hijack=70%、stealth=60%）；15 blocked，15 inserted。  
+> Defense B — RSR=**90%**（防禦前），DBR-B=**80%** / CDR-B=**42.11%**（blocker=75%、hijack=67%、stealth=100%）。  
+> CDR-B 偏高主因為 Stage 2 離題偵測對同領域 Blocker 的誤判；Stealth 完全被 Stage 1 矛盾偵測清除。
 
 ---
 

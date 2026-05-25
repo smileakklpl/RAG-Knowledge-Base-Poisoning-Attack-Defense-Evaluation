@@ -43,7 +43,7 @@ class Phase2Injector:
         conn = self._connect()
 
         from src.defense.filter import ConsistencyDefenseFilter
-        defense_a = ConsistencyDefenseFilter.from_config(self.config, conn)
+        defense_a = ConsistencyDefenseFilter.for_phase_a(self.config, conn)
 
         # ── Process poison chunks ─────────────────────────────────────────────
         poison_chunks = self._load_poison_chunks(poison_chunks_path)

@@ -36,10 +36,11 @@ class ConsistencyDefenseFilter:
 
     Usage:
         conn = psycopg2.connect(...)
-        flt = ConsistencyDefenseFilter.from_config(config, conn)
+        flt = ConsistencyDefenseFilter.for_phase_a(config, conn)
         # Defense A
         is_malicious, score = flt.predict(chunk_text)
         # Defense B
+        flt = ConsistencyDefenseFilter.for_phase_b(config, conn)
         is_malicious, score = flt.predict(chunk_text, query_text=query)
     """
 
@@ -48,12 +49,14 @@ class ConsistencyDefenseFilter:
         conn,
         embedding_model: str,
         llm_model:       str,
-        top_k_ref:       int = 5,
+        top_k_ref:       int  = 5,
+        enabled:         bool = True,
     ):
         self.conn            = conn
         self.embedding_model = embedding_model
         self.llm_model       = llm_model
         self.top_k_ref       = top_k_ref
+        self.enabled         = enabled
 
     # ── Public interface ──────────────────────────────────────────────────────
 
@@ -77,6 +80,9 @@ class ConsistencyDefenseFilter:
               0.5  no clean refs available, cannot judge → allow
               0.0  passes all checks → allow
         """
+        if not self.enabled:
+            return False, 0.0
+
         embedding  = self._embed(chunk_text)
         ref_chunks = self._retrieve_similar_clean(embedding)
 
@@ -196,11 +202,34 @@ class ConsistencyDefenseFilter:
     # ── Factory ───────────────────────────────────────────────────────────────
 
     @classmethod
+    def for_phase_a(cls, config: "ExperimentConfig", conn) -> "ConsistencyDefenseFilter":
+        """Defense A (pre-injection): reads defense.pre_injection.enabled from config."""
+        defense  = getattr(config, "defense", {}) or {}
+        enabled  = defense.get("pre_injection", {}).get("enabled", True)
+        return cls(
+            conn=conn,
+            embedding_model=config.embedding_model,
+            llm_model=defense.get("llm_model", getattr(config, "attacker_model", "gemma4:e4b")),
+            top_k_ref=int(defense.get("top_k_ref", 5)),
+            enabled=bool(enabled),
+        )
+
+    @classmethod
+    def for_phase_b(cls, config: "ExperimentConfig", conn) -> "ConsistencyDefenseFilter":
+        """Defense B (post-retrieval): reads defense.post_retrieval.enabled from config."""
+        defense  = getattr(config, "defense", {}) or {}
+        enabled  = defense.get("post_retrieval", {}).get("enabled", True)
+        return cls(
+            conn=conn,
+            embedding_model=config.embedding_model,
+            llm_model=defense.get("llm_model", getattr(config, "attacker_model", "gemma4:e4b")),
+            top_k_ref=int(defense.get("top_k_ref", 5)),
+            enabled=bool(enabled),
+        )
+
+    @classmethod
     def from_config(cls, config: "ExperimentConfig", conn) -> "ConsistencyDefenseFilter":
-        """
-        Instantiate from YAML config.
-        Both Defense A (pre_injection) and Defense B (post_retrieval) use the same logic.
-        """
+        """Legacy factory — always enabled. Prefer for_phase_a / for_phase_b."""
         defense = getattr(config, "defense", {}) or {}
         return cls(
             conn=conn,

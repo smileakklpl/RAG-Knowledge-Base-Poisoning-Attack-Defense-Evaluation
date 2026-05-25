@@ -15,7 +15,7 @@
 | **輸入** | `output/phase1/poison_chunks.json`（攻擊者的修改版 chunks） |
 | **輸出（DB）** | pgvector 中追加通過防禦的 poison chunks（`is_original=False, is_poison=True`） |
 | **輸出（檔案）** | `output/phase2/audit_defense_a.jsonl`（每筆 chunk 的防禦判定記錄）<br/>`output/phase2/report.md` |
-| **執行約束** | 不需要 LLM；只需 Embedding Model + GPT-2（PPL 計算）；CPU 推論即可 |
+| **執行約束** | 需要 Embedding Model（bge-m3）+ LLM（gemma4:e4b 矛盾偵測）；Ollama 本地推論 |
 
 ---
 
@@ -73,7 +73,7 @@ Phase 1 poison chunks（修改版）
     │
     ▼
 ┌──────────────────────────────────────────┐
-│  Defense Filter A（PPL Filtering）       │
+│  Defense Filter A（矛盾偵測）            │
 │  (方法論見 docs/defense_methodology.md)  │
 │                                          │
 │  輸入：chunk_text                        │
@@ -158,6 +158,26 @@ CDR_A = sum(r["predicted_is_malicious"] for r in cdr)    / len(cdr)
 2. 攻擊者注入時 `is_original=FALSE`，讓後續查詢仍能區分乾淨原始與注入來源
 3. CDR 測試的 CUAD 樣本使用 `seed+1`，不保證與 Phase 1 完全不重疊，但統計意義上仍有效
 4. 審計日誌必須記錄**所有**候選 chunk（含 CDR 測試）才能計算完整混淆矩陣
+
+---
+
+## 實驗結果（experiment_01）
+
+| 指標 | 值 |
+|------|---|
+| Poison chunks 送入 | 30（10 queries × 3 types） |
+| 被 Defense A 阻擋 | 15（50%） |
+| 成功注入 pgvector | 15 |
+| **DBR-A** | **50%** |
+| **CDR-A** | **5%**（40 筆乾淨 CDR chunks，2 筆誤攔） |
+
+| 攻擊類型 | Total | Caught | DBR | Avg Score |
+|---------|-------|--------|-----|-----------|
+| blocker | 10 | 2 | 20% | 0.200 |
+| hijack  | 10 | 7 | 70% | 0.700 |
+| stealth | 10 | 6 | 60% | 0.600 |
+
+> Blocker DBR 最低（20%）：Blocker 不引入事實矛盾，Stage 1 矛盾偵測幾乎無效，需靠 Defense B Stage 2 離題偵測補救。
 
 ---
 

@@ -2,18 +2,19 @@
 main.py — RAG 知識庫污染攻擊與防禦評估管線
 
 五階段執行流程：
-  Phase 1  攻擊生成   → output/poison_chunks.json
-  Phase 2  入庫防禦 A → pgvector DB + output/audit_defense_a.jsonl
-  Phase 3  檢索防禦 B → output/retrieval_results.json + output/audit_defense_b.jsonl
-  Phase 4  目標生成   → output/phase4_results.json
-  Phase 5  人工標註   → output/phase5_annotated.json（互動式 CLI）
+  Phase 1  攻擊生成   → <output>/phase1/poison_chunks.json
+  Phase 2  入庫防禦 A → pgvector DB + <output>/phase2/audit_defense_a.jsonl
+  Phase 3  檢索防禦 B → <output>/phase3/retrieval_results.json + audit_defense_b.jsonl
+  Phase 4  目標生成   → <output>/phase4/phase4_results.json
+  Phase 5  人工標註   → <output>/phase5/phase5_annotated.json（互動式 CLI）
 
 用法：
-    python main.py                       # 完整五階段
-    python main.py --phases 1 2 3 4     # 跳過 Phase 5
-    python main.py --from-phase 3       # 從 Phase 3 繼續（前兩階已有輸出）
-    python main.py --phase 1            # 單獨執行 Phase 1
-    python main.py --force              # 無視現有輸出，重新執行全部
+    python main.py                                           # 完整五階段（預設 config + output/）
+    python main.py --phases 1 2 3 4                         # 跳過 Phase 5
+    python main.py --from-phase 3                           # 從 Phase 3 繼續
+    python main.py --phase 1                                # 單獨執行 Phase 1
+    python main.py --force                                  # 無視現有輸出，重新執行全部
+    python main.py --config configs/experiment_no_defense.yaml --output-dir output/no_defense --phases 1 2 3 4 --force
 """
 
 import argparse
@@ -24,17 +25,9 @@ from pathlib import Path
 
 from src.config import ExperimentConfig
 
-CONFIG_PATH  = "configs/experiment_01.yaml"
-QUERIES_PATH = "data/queries.json"
-
-# 各 Phase 的主要輸出檔案，用於判斷是否已完成
-PHASE_OUTPUTS = {
-    1: Path("output/phase1/poison_chunks.json"),
-    2: Path("output/phase2/audit_defense_a.jsonl"),
-    3: Path("output/phase3/retrieval_results.json"),
-    4: Path("output/phase4/phase4_results.json"),
-    5: Path("output/phase5/phase5_annotated.json"),
-}
+DEFAULT_CONFIG     = "configs/experiment_01.yaml"
+DEFAULT_OUTPUT_DIR = "output"
+QUERIES_PATH       = "data/queries.json"
 
 PHASE_NAMES = {
     1: "Phase 1 — Attack Generation",
@@ -44,58 +37,70 @@ PHASE_NAMES = {
     5: "Phase 5 — Human Annotation",
 }
 
+
+def _phase_outputs(output_dir: str) -> dict[int, Path]:
+    base = Path(output_dir)
+    return {
+        1: base / "phase1/poison_chunks.json",
+        2: base / "phase2/audit_defense_a.jsonl",
+        3: base / "phase3/retrieval_results.json",
+        4: base / "phase4/phase4_results.json",
+        5: base / "phase5/phase5_annotated.json",
+    }
+
+
 # ── Phase runners ─────────────────────────────────────────────────────────────
 
-def run_phase1(config: ExperimentConfig) -> None:
+def run_phase1(config: ExperimentConfig, paths: dict[int, Path]) -> None:
     from src.pipeline.phase1 import Phase1Generator
 
     queries   = json.loads(Path(QUERIES_PATH).read_text(encoding="utf-8"))
     generator = Phase1Generator(config)
     generator.run(
         queries=queries,
-        output_path=str(PHASE_OUTPUTS[1]),
+        output_path=str(paths[1]),
         attack_types=["hijack", "blocker", "stealth"],
     )
 
 
-def run_phase2(config: ExperimentConfig) -> None:
+def run_phase2(config: ExperimentConfig, paths: dict[int, Path]) -> None:
     from src.pipeline.phase2 import Phase2Injector
 
     injector = Phase2Injector(config)
     injector.run(
-        poison_chunks_path=str(PHASE_OUTPUTS[1]),
-        output_audit_path=str(PHASE_OUTPUTS[2]),
+        poison_chunks_path=str(paths[1]),
+        output_audit_path=str(paths[2]),
     )
 
 
-def run_phase3(config: ExperimentConfig) -> None:
+def run_phase3(config: ExperimentConfig, paths: dict[int, Path]) -> None:
     from src.pipeline.phase3 import Phase3Retriever
 
     retriever = Phase3Retriever(config)
     retriever.run(
         queries_path=QUERIES_PATH,
-        output_results_path=str(PHASE_OUTPUTS[3]),
-        output_audit_path="output/phase3/audit_defense_b.jsonl",
+        output_results_path=str(paths[3]),
+        output_audit_path=str(paths[3].parent / "audit_defense_b.jsonl"),
     )
 
 
-def run_phase4(config: ExperimentConfig) -> None:
+def run_phase4(config: ExperimentConfig, paths: dict[int, Path]) -> None:
     from src.pipeline.phase4 import Phase4Generator
 
     generator = Phase4Generator(config)
     generator.run(
-        retrieval_results_path=str(PHASE_OUTPUTS[3]),
+        retrieval_results_path=str(paths[3]),
         queries_path=QUERIES_PATH,
-        output_path=str(PHASE_OUTPUTS[4]),
+        output_path=str(paths[4]),
     )
 
 
-def run_phase5(_config: ExperimentConfig) -> None:
+def run_phase5(_config: ExperimentConfig, paths: dict[int, Path]) -> None:
     from src.pipeline.phase5 import run_annotation
 
     run_annotation(
-        input_path=str(PHASE_OUTPUTS[4]),
-        output_path=str(PHASE_OUTPUTS[5]),
+        input_path=str(paths[4]),
+        output_path=str(paths[5]),
     )
 
 
@@ -132,6 +137,14 @@ def main() -> None:
         "--force", action="store_true",
         help="Re-run phases even if output already exists",
     )
+    parser.add_argument(
+        "--config", default=DEFAULT_CONFIG, metavar="PATH",
+        help=f"Path to experiment YAML config (default: {DEFAULT_CONFIG})",
+    )
+    parser.add_argument(
+        "--output-dir", default=DEFAULT_OUTPUT_DIR, dest="output_dir", metavar="DIR",
+        help=f"Root directory for all phase outputs (default: {DEFAULT_OUTPUT_DIR})",
+    )
     args = parser.parse_args()
 
     if args.phase:
@@ -143,10 +156,13 @@ def main() -> None:
     else:
         phases_to_run = [1, 2, 3, 4, 5]
 
-    config = ExperimentConfig.from_yaml(CONFIG_PATH)
+    config       = ExperimentConfig.from_yaml(args.config)
+    phase_outputs = _phase_outputs(args.output_dir)
 
     print(f"\n{'='*60}")
     print(f"  RAG Poisoning Pipeline")
+    print(f"  Config   : {args.config}")
+    print(f"  Output   : {args.output_dir}")
     print(f"  Phases   : {phases_to_run}")
     print(f"  Attacker : {config.attacker_model}")
     print(f"  Target   : {config.target_model}")
@@ -156,7 +172,7 @@ def main() -> None:
     pipeline_start = time.perf_counter()
 
     for phase_num in phases_to_run:
-        output = PHASE_OUTPUTS.get(phase_num)
+        output = phase_outputs.get(phase_num)
         if output and output.exists() and not args.force and phase_num != 5:
             print(f"[SKIP]  {PHASE_NAMES[phase_num]}")
             print(f"        output already exists: {output}")
@@ -169,7 +185,7 @@ def main() -> None:
 
         t = time.perf_counter()
         try:
-            _RUNNERS[phase_num](config)
+            _RUNNERS[phase_num](config, phase_outputs)
         except NotImplementedError as exc:
             print(f"\n[NOT IMPLEMENTED] {exc}\n")
             sys.exit(1)

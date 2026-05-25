@@ -102,7 +102,7 @@ sanitized_contexts.json   ──►   for query in all_queries:
 
   "phase4": {
     "target_model":        "gemma4:26b",
-    "prompt_version":      "v1.0",
+    "prompt_version":      "v1.1",
     "target_answer":       "According to the contract, 90 days written notice is required...",
     "latency_ms":          12345
   },
@@ -148,6 +148,26 @@ sanitized_contexts.json   ──►   for query in all_queries:
 2. 所有 query **批次完成**再進入 Phase 5，不可在 query 迴圈內交替呼叫
 3. 即使 Phase 3 過濾後 sanitized 為空（所有 Top-K 都被擋下），仍需呼叫 Target LLM 並記錄回答（通常會回 "cannot find"），這是 Phase 5 評估的依據
 4. Target Model 與 Phase 1 Attacker Model 不同型號，避免「自己攻自己」帶來的偏誤
+
+---
+
+## 實驗結果（experiment_01）
+
+| 指標 | 值 |
+|------|---|
+| 總 entries（query × k） | 10 |
+| Context 含毒 entries | 9（防禦點 B 漏網） |
+| 平均 LLM 延遲 | 180418 ms（≈ 180s） |
+| **Prompt 版本** | **v1.1** |
+
+| 投票參數 | 值 |
+|---------|---|
+| 組數 g | 3 |
+| 投票門檻 α | 0.5（需 2/3 組同意） |
+| 平均 voted keywords | 21.0 |
+
+> 9/10 queries 的 sanitized context 仍含至少一筆毒 chunk（Phase 3 Defense B 漏網），  
+> 但 Voting（g=3, α=0.5）可對多數漏網毒 chunk 提供答案層保護，具體效果待 Phase 5 人工標註後計算 ASR。
 
 ---
 

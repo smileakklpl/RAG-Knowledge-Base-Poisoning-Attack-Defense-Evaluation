@@ -51,7 +51,7 @@ class Phase3Retriever:
         max_k = max(self.config.top_k)
 
         from src.defense.filter import ConsistencyDefenseFilter
-        defense_b = ConsistencyDefenseFilter.from_config(self.config, conn)
+        defense_b = ConsistencyDefenseFilter.for_phase_b(self.config, conn)
 
         all_results: list[dict] = []
         all_audit:   list[dict] = []
@@ -264,16 +264,40 @@ def _write_report(
     dbr_b  = sum(1 for r in poison if r["predicted_is_malicious"]) / max(len(poison), 1)
     cdr_b  = sum(1 for r in clean  if r["predicted_is_malicious"]) / max(len(clean),  1)
 
-    # Per-attack-type RSR (use max k for overview)
-    max_k     = max(k_values)
-    max_k_res = [r for r in results if r["top_k"] == max_k]
-    at_rsr: dict[str, tuple[int, int]] = {}
+    # Per-attack-type RSR: queries that retrieved ≥1 chunk of each type (max k)
+    max_k      = max(k_values)
+    max_k_res  = [r for r in results if r["top_k"] == max_k]
+    n_queries   = len(max_k_res)
+    at_rsr: dict[str, int] = {}
     for r in max_k_res:
+        seen_types: set[str] = set()
         for raw in r["raw_results"]:
-            if raw["is_poison"] and raw["attack_type"]:
+            if raw["is_poison"] and raw["attack_type"] and raw["attack_type"] not in seen_types:
                 at = raw["attack_type"]
-                total, hit = at_rsr.get(at, (0, 0))
-                at_rsr[at] = (total + 1, hit + (1 if raw["rank"] <= max_k else 0))
+                at_rsr[at] = at_rsr.get(at, 0) + 1
+                seen_types.add(at)
+
+    # Per-attack-type DBR-B (from deduped audit)
+    at_dbr: dict[str, list[dict]] = {}
+    for r in poison:
+        at = r.get("attack_type") or "unknown"
+        at_dbr.setdefault(at, []).append(r)
+
+    attack_types = sorted(set(list(at_dbr.keys()) + list(at_rsr.keys())))
+    at_rows = []
+    for at in attack_types:
+        in_topk = len(at_dbr.get(at, []))
+        caught  = sum(1 for r in at_dbr.get(at, []) if r["predicted_is_malicious"])
+        avg_s   = sum(r["defense_score"] for r in at_dbr.get(at, [])) / max(in_topk, 1)
+        q_hit   = at_rsr.get(at, 0)
+        at_rows.append((
+            at,
+            f"{q_hit}/{n_queries} ({q_hit / max(n_queries, 1):.0%})",
+            in_topk,
+            caught,
+            f"{caught / max(in_topk, 1):.0%}",
+            f"{avg_s:.3f}",
+        ))
 
     lines = [
         "# Phase 3 — Experiment Report",
@@ -308,6 +332,16 @@ def _write_report(
         f"| **DBR-B** (poison caught / total poison in top-k) | **{dbr_b:.2%}** |",
         f"| **CDR-B** (clean wrongly blocked / total clean in top-k) | **{cdr_b:.2%}** |",
         "",
+        "### Per-Attack-Type Breakdown",
+        "",
+        "| Attack Type | Queries Hit (RSR) | In Top-K | Caught | DBR-B | Avg Score |",
+        "|-------------|-------------------|----------|--------|-------|-----------|",
+    ]
+    for at, rsr_str, in_topk, caught, dbr_pct, avg_s in at_rows:
+        lines.append(f"| {at} | {rsr_str} | {in_topk} | {caught} | {dbr_pct} | {avg_s} |")
+
+    lines += [
+        "",
         "---",
         "",
         "## Notes",
@@ -315,8 +349,8 @@ def _write_report(
         "- RSR measures attack strength (before defense); DBR-B measures defense effectiveness at B",
         "- Stealth attacks alter key facts while maintaining semantic similarity; consistency voting targets this",
         "- Physical DELETE applied incrementally: earlier queries' deletions affect later queries",
-        "- Retrieval results with sanitized context: `output/retrieval_results.json`",
-        "- Per-chunk audit log: `output/audit_defense_b.jsonl`",
+        "- Retrieval results with sanitized context: `output/phase3/retrieval_results.json`",
+        "- Per-chunk audit log: `output/phase3/audit_defense_b.jsonl`",
     ]
 
     path.parent.mkdir(parents=True, exist_ok=True)

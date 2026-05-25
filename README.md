@@ -140,7 +140,7 @@ seed: 42                           # 隨機種子
 2. **Blocker（阻斷型）**
    - 風格：機密保密條款、法律特權聲明
    - 效果：LLM 拒絕回答（「無法提供此資訊」「受政策限制」）
-   - 防禦難度：低（明顯的拒答語氣）
+   - 防禦難度：低至中（不含事實矛盾，Defense A 幾乎無效；Defense B Stage 2 離題偵測可攔截）
 
 3. **Stealth（隱蔽型）**
    - 風格：真實合約樣板，錯誤資訊用「業界慣例」等短語自然嵌入
@@ -317,18 +317,23 @@ docs/
   - Step B：對每個 query，從 DB 撈出 top-`n_retrieved_per_query` 個最相關的 original chunk
   - Step C：Attacker LLM 以三種手法（Hijack / Blocker / Stealth）修改撈到的 chunk，三個評估器迭代優化
   - `PoisonChunk` 新增 `original_chunk_id` / `original_chunk_text`，供 Phase 2 審計對照
-- [x] **Phase 2** — 重構為「注入嘗試 + 防禦點 A」
+- [x] **Phase 2** — 重構為「注入嘗試 + 防禦點 A」，實驗結果（experiment_01，30 poison / 200 clean / 40 CDR）：
   - DB 已預載乾淨 originals（Phase 1 完成），Phase 2 不再載入 CUAD
   - Defense A（矛盾偵測）→ 阻擋者不入庫；通過者以 `is_original=False` 寫入
-  - CDR 測試：額外載入 `n_cdr_chunks` 筆 CUAD chunks（seed+1，非 DB 原始集合）量測誤攔率
-- [x] **Phase 3** — `src/pipeline/phase3.py` 實作完成，執行驗證通過（31s）
+  - CDR 測試：額外載入 `n_cdr_chunks=40` 筆 CUAD chunks（seed+1，非 DB 原始集合）量測誤攔率
+  - **DBR-A = 50%**（blocked 15/30）：blocker=20%、hijack=70%、stealth=60%
+  - **CDR-A = 5%**（誤攔 2/40 筆乾淨 chunks）
+- [x] **Phase 3** — `src/pipeline/phase3.py` 實作完成，10 queries × k=9
   - bge-m3 embed query → pgvector cosine top-k（k=9）
   - Defense B（矛盾偵測 Stage 1 + 離題偵測 Stage 2）→ 物理 DELETE 惡意 chunk
   - Stage 2 針對 Blocker 攻擊：chunk 明顯來自不同法律領域時阻擋（score=0.7）
-- [x] **Phase 4** — `src/pipeline/phase4.py` 實作完成，執行驗證通過（~23min）
-  - Sanitized context + RAG prompt v1.0 → `gemma4:26b` 批次生成
-  - 30 筆 entry（10 queries × 3 k 值），含毒化 context 比例依防禦效果而定
-  - 初步觀察：q02（適用法律）完全中毒，q01（終止天數）部分中毒
+  - **RSR = 90%**（防禦前，9/10 queries 命中毒 chunk）
+  - **DBR-B = 80%**（毒 chunks 攔截率）：blocker=75%、hijack=67%、stealth=100%
+  - **CDR-B = 42.11%**（乾淨 chunk 誤攔率，偏高，與 Stage 2 離題判斷有關）
+- [x] **Phase 4** — `src/pipeline/phase4.py` 實作完成，voting 模式（g=3, α=0.5）
+  - Sanitized context + RAG prompt v1.1 → `gemma4:26b` 批次生成（avg latency ≈ 180s）
+  - 10 entries（10 queries × k=9），9 筆 context 仍含毒 chunk（防禦點 B 漏網）
+  - Voting：3 組 round-robin，avg voted keywords=21.0
 - [x] **Phase 5 標註工具** — `src/pipeline/phase5.py` 核心邏輯 + `tools/annotate.py` CLI 入口
   - 逐筆顯示 query / 實際注入文字（Phase 1） / model_answer（Phase 4）
   - 對照 Phase 3 retrieval 記錄，顯示每個 poison chunk 的攻擊類型與 rank
@@ -337,5 +342,5 @@ docs/
 
 ### 待完成
 
-- [ ] **Phase 5 人工標註執行** — 執行 `python main.py --phase 5` 完成標註
-- [ ] **資料稀釋防禦實驗** — 設定 `n_clean_chunks=100 / n_poison_chunks=5`，執行 `python main.py --phases 2 3 4 --force`，與基準組（1 clean + 15 poison, ASR=100%）比較 ASR 變化
+- [ ] **Phase 5 人工標註執行** — 執行 `python main.py --phase 5` 完成標註，計算最終 ASR
+- [ ] **資料稀釋防禦實驗** — 設定 `n_clean_chunks=100 / n_poison_chunks=5`，執行 `python main.py --phases 2 3 4 --force`，與 A+B 基準組（200 clean + 30 poison，Phase 5 標完後取 ASR）比較稀釋效果

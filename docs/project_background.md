@@ -21,7 +21,7 @@
 
 **新目標**：設計一套半自動化管線，模擬攻擊者將「包含隱蔽惡意指令的文本」注入至向量資料庫中，測試當使用者發出正常查詢時，系統是否會檢索到有毒文本並導致模型執行惡意行為。防禦端採用**雙防禦點設計**：
 
-- **防禦點 A（入庫前）**：Attacker 嘗試將惡意 chunk 寫入向量資料庫時即進行偵測，命中後物理 DELETE。
+- **防禦點 A（入庫前）**：Attacker 嘗試將惡意 chunk 寫入向量資料庫時即進行偵測，命中後拒絕注入（不寫入資料庫）。
 - **防禦點 B（檢索後）**：Target LLM 從 RAG 取出 Top-K 後再過濾，命中者**標記 + 物理 DELETE** 並從 context 中移除。
 
 最終攻擊成功與否由**人工標註**判定（移除 Judge LLM 自動評估），提升學術專題的可信度。
@@ -89,7 +89,7 @@
 ```
 
 每個 Phase 的完整輸入/輸出規格、實作細節與踩雷提醒，請見各 `phase*.md` 文件。  
-雙防禦點共用的偵測方法論獨立放在 `defense_methodology.md`（候選方案，最終方法待補）。
+雙防禦點共用的偵測方法論獨立放在 `defense_methodology.md`（語料庫一致性投票，LLM 矛盾偵測 + 離題偵測）。
 
 ---
 
@@ -102,7 +102,7 @@
 | Target | gemma4:26b（量化） | Phase 4 批次生成回答 |
 | Embedding | BAAI/bge-m3 | 本地部署，支援多語言，向量維度 1024 |
 | Vector DB | **Postgres + pgvector** | SQL 介面熟悉、原生支援 DELETE / metadata 過濾、HNSW 索引 |
-| 防禦方法論 | 候選：特徵 + XGBoost | 最終方法論待補（見 `defense_methodology.md`）；雙防禦點共用 |
+| 防禦方法論 | **語料庫一致性投票**（LLM-based） | Defense A：矛盾偵測；Defense B：矛盾偵測 + 離題偵測（見 `defense_methodology.md`） |
 | 評估方式 | **人工 JSON 標註** | 不再使用 Judge LLM，提升學術專題的可信度與可重現性 |
 | 開發框架 | 原生 Python + Ollama SDK | 不依賴 LangChain / LlamaIndex |
 
@@ -127,13 +127,13 @@
 
 ---
 
-## 7. 當前開發目標
+## 7. 當前開發狀態
 
-團隊目前處於開發起步階段，建議開發順序：
+管線 Phase 1–4 已全部實作完成並通過執行驗證，目前僅剩 Phase 5 人工標註：
 
-1. **基礎環境**：建立 pgvector 資料庫、確認 Ollama + 模型可用
-2. **Phase 2 / 3 骨架**：先不接防禦器，跑通 CUAD 入庫 → 檢索 → 量測 RSR
-3. **Phase 1 補齊資料**：至少 20～50 筆 Poisoned Chunks（已實作）
-4. **Phase 4 / 5 串接**：Target LLM 批次生成 → 人工標註小批次（10～20 筆）驗證流程
-5. **接入防禦點 A、B**：先 rule-based baseline，再依最終方法論替換
-6. **完整 Ablation**：跑 `no_defense` / `only_A` / `only_B` / `A + B` 四種設定
+- [x] Phase 1：預載 DB（200 clean chunks）+ 攻擊生成（30 poison chunks）
+- [x] Phase 2：注入嘗試 + Defense A（DBR-A=50%, CDR-A=5%）
+- [x] Phase 3：檢索 + Defense B（RSR=90%, DBR-B=80%, CDR-B=42.11%）
+- [x] Phase 4：Target LLM voting 生成（g=3, α=0.5，10 queries）
+- [ ] Phase 5：人工標註 → 計算 ASR（執行 `python main.py --phase 5`）
+- [ ] Ablation：`no_defense` / `only_A` / `only_B` / `A + B` 四組比較
