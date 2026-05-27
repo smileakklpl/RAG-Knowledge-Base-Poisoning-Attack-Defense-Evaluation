@@ -50,8 +50,7 @@ class Phase3Retriever:
         conn  = self._connect()
         max_k = max(self.config.top_k)
 
-        from src.defense.filter import ConsistencyDefenseFilter
-        defense_b = ConsistencyDefenseFilter.for_phase_b(self.config, conn)
+        defense_b = _make_defense_filter_b(self.config, conn)
 
         all_results: list[dict] = []
         all_audit:   list[dict] = []
@@ -138,7 +137,8 @@ class Phase3Retriever:
         self._print_metrics(all_results, all_audit)
 
         report_path = out.parent / "report.md"
-        _write_report(report_path, all_results, all_audit, self.config)
+        _write_report(report_path, all_results, all_audit, self.config,
+                      defense_method=_defense_method_label(self.config))
         print(f"[Phase3] Report            → {report_path}")
 
     # ── pgvector retrieval ────────────────────────────────────────────────────
@@ -240,11 +240,31 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _make_defense_filter_b(config, conn):
+    """Return the Defense B filter instance based on config.defense.method."""
+    method = (getattr(config, "defense", {}) or {}).get("method", "voting")
+    if method == "ppl":
+        from src.defense.filter_PPL import PPLDefenseFilter
+        return PPLDefenseFilter.for_phase_b(config)
+    from src.defense.filter import ConsistencyDefenseFilter
+    return ConsistencyDefenseFilter.for_phase_b(config, conn)
+
+
+def _defense_method_label(config) -> str:
+    method = (getattr(config, "defense", {}) or {}).get("method", "voting")
+    return (
+        "PPL Perplexity Filtering (GPT-2 anomaly detection)"
+        if method == "ppl" else
+        "Corpus Consistency Voting (LLM-based contradiction detection)"
+    )
+
+
 def _write_report(
     path:    Path,
     results: list[dict],
     audit:   list[dict],
     config,
+    defense_method: str = "Corpus Consistency Voting (LLM-based contradiction detection)",
 ) -> None:
     # RSR per k
     k_values = sorted({r["top_k"] for r in results})
@@ -304,9 +324,15 @@ def _write_report(
         "",
         f"**Run time**: {_now_iso()}  ",
         f"**Config**: `configs/experiment_01.yaml`  ",
-        f"**Defense method**: Corpus Consistency Voting (LLM-based contradiction detection)  ",
-        f"**Defense B LLM**: `{config.defense.get('llm_model', 'gemma4:e4b')}`  "
-        f"top_k_ref={config.defense.get('top_k_ref', 5)}  ",
+        f"**Defense method**: {defense_method}  ",
+        *(
+            [f"**Defense B LLM**: `{config.defense.get('llm_model', 'gemma4:e4b')}`  "
+             f"top_k_ref={config.defense.get('top_k_ref', 5)}  "]
+            if config.defense.get("method", "voting") != "ppl" else
+            [f"**PPL model**: GPT-2 small  "
+             f"global_thresh={config.defense.get('post_retrieval', {}).get('global_ppl_threshold', 100.0)}  "
+             f"spike_thresh={config.defense.get('post_retrieval', {}).get('spike_ppl_threshold', 150.0)}  "]
+        ),
         f"**Top-K values tested**: {k_values}  ",
         "",
         "---",

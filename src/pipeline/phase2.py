@@ -42,8 +42,12 @@ class Phase2Injector:
     def run(self, poison_chunks_path: str, output_audit_path: str) -> None:
         conn = self._connect()
 
-        from src.defense.filter import ConsistencyDefenseFilter
-        defense_a = ConsistencyDefenseFilter.for_phase_a(self.config, conn)
+        # Reset: remove all previously injected (non-original) chunks so each run
+        # starts from the same Phase 1 clean-DB state regardless of prior experiments.
+        self._clear_injected_chunks(conn)
+        print("[Phase2] DB reset: removed all non-original chunks (is_original=FALSE).")
+
+        defense_a = _make_defense_filter_a(self.config, conn)
 
         # ── Process poison chunks ─────────────────────────────────────────────
         poison_chunks = self._load_poison_chunks(poison_chunks_path)
@@ -122,6 +126,7 @@ class Phase2Injector:
             report_path, poison_records, cdr_records,
             inserted, blocked, cdr_blocked, self.config,
             self._chunk_tokens, self._chunk_overlap,
+            defense_method=_defense_method_label(self.config),
         )
         print(f"[Phase2] Report    → {report_path}")
 
@@ -260,6 +265,25 @@ class Phase2Injector:
 
 # ── Module-level helpers ──────────────────────────────────────────────────────
 
+def _make_defense_filter_a(config, conn):
+    """Return the Defense A filter instance based on config.defense.method."""
+    method = (getattr(config, "defense", {}) or {}).get("method", "voting")
+    if method == "ppl":
+        from src.defense.filter_PPL import PPLDefenseFilter
+        return PPLDefenseFilter.for_phase_a(config)
+    from src.defense.filter import ConsistencyDefenseFilter
+    return ConsistencyDefenseFilter.for_phase_a(config, conn)
+
+
+def _defense_method_label(config) -> str:
+    method = (getattr(config, "defense", {}) or {}).get("method", "voting")
+    return (
+        "PPL Perplexity Filtering (GPT-2 anomaly detection)"
+        if method == "ppl" else
+        "Corpus Consistency Voting (LLM-based contradiction detection)"
+    )
+
+
 def _write_jsonl(path: Path, records: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
@@ -281,6 +305,7 @@ def _write_report(
     config,
     chunk_tokens:   int = 300,
     chunk_overlap:  int = 50,
+    defense_method: str = "Corpus Consistency Voting (LLM-based contradiction detection)",
 ) -> None:
     total_poison = len(poison_records)
     dbr = blocked / max(total_poison, 1)
@@ -300,9 +325,15 @@ def _write_report(
         "",
         f"**Run time**: {_now_iso()}  ",
         f"**Config**: `configs/experiment_01.yaml`  ",
-        f"**Defense method**: Corpus Consistency Voting (LLM-based contradiction detection)  ",
-        f"**Defense A LLM**: `{config.defense.get('llm_model', 'gemma4:e4b')}`  "
-        f"top_k_ref={config.defense.get('top_k_ref', 5)}  ",
+        f"**Defense method**: {defense_method}  ",
+        *(
+            [f"**Defense A LLM**: `{config.defense.get('llm_model', 'gemma4:e4b')}`  "
+             f"top_k_ref={config.defense.get('top_k_ref', 5)}  "]
+            if config.defense.get("method", "voting") != "ppl" else
+            [f"**PPL model**: GPT-2 small  "
+             f"global_thresh={config.defense.get('pre_injection', {}).get('global_ppl_threshold', 80.0)}  "
+             f"spike_thresh={config.defense.get('pre_injection', {}).get('spike_ppl_threshold', 120.0)}  "]
+        ),
         "",
         "---",
         "",

@@ -63,12 +63,20 @@ def run_phase1(config: ExperimentConfig, paths: dict[int, Path]) -> None:
     )
 
 
-def run_phase2(config: ExperimentConfig, paths: dict[int, Path]) -> None:
+def run_phase2(
+    config: ExperimentConfig,
+    paths: dict[int, Path],
+    phase1_dir: str | None = None,
+) -> None:
     from src.pipeline.phase2 import Phase2Injector
 
+    poison_path = (
+        Path(phase1_dir) / "phase1" / "poison_chunks.json"
+        if phase1_dir else paths[1]
+    )
     injector = Phase2Injector(config)
     injector.run(
-        poison_chunks_path=str(paths[1]),
+        poison_chunks_path=str(poison_path),
         output_audit_path=str(paths[2]),
     )
 
@@ -145,6 +153,11 @@ def main() -> None:
         "--output-dir", default=DEFAULT_OUTPUT_DIR, dest="output_dir", metavar="DIR",
         help=f"Root directory for all phase outputs (default: {DEFAULT_OUTPUT_DIR})",
     )
+    parser.add_argument(
+        "--phase1-dir", default=None, dest="phase1_dir", metavar="DIR",
+        help="Directory that contains phase1/poison_chunks.json (default: same as --output-dir). "
+             "Use when re-running Phase 2+ with a different config but the same Phase 1 output.",
+    )
     args = parser.parse_args()
 
     if args.phase:
@@ -156,8 +169,9 @@ def main() -> None:
     else:
         phases_to_run = [1, 2, 3, 4, 5]
 
-    config       = ExperimentConfig.from_yaml(args.config)
+    config        = ExperimentConfig.from_yaml(args.config)
     phase_outputs = _phase_outputs(args.output_dir)
+    phase1_dir    = args.phase1_dir
 
     print(f"\n{'='*60}")
     print(f"  RAG Poisoning Pipeline")
@@ -185,7 +199,10 @@ def main() -> None:
 
         t = time.perf_counter()
         try:
-            _RUNNERS[phase_num](config, phase_outputs)
+            if phase_num == 2:
+                run_phase2(config, phase_outputs, phase1_dir)
+            else:
+                _RUNNERS[phase_num](config, phase_outputs)
         except NotImplementedError as exc:
             print(f"\n[NOT IMPLEMENTED] {exc}\n")
             sys.exit(1)
