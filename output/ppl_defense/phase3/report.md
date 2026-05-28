@@ -1,9 +1,9 @@
 # Phase 3 — Experiment Report
 
-**Run time**: 2026-05-28T05:45:54.689404+00:00  
+**Run time**: 2026-05-28T06:53:00.388839+00:00  
 **Config**: `configs/experiment_01.yaml`  
-**Defense method**: Corpus Consistency Voting (LLM-based contradiction detection)  
-**Defense B LLM**: `gemma4:e4b`  top_k_ref=5  
+**Defense method**: PPL Perplexity Filtering (GPT-2 anomaly detection)  
+**PPL model**: GPT-2 small  global_thresh=100.0  spike_thresh=150.0  
 **Top-K values tested**: [9]  
 
 ---
@@ -12,7 +12,7 @@
 
 | Top-K | Queries | Poison Hit | RSR |
 |-------|---------|------------|-----|
-| 9 | 10 | 9 | 90.00% |
+| 9 | 10 | 10 | 100.00% |
 
 ---
 
@@ -20,18 +20,18 @@
 
 | Metric | Value |
 |--------|-------|
-| Unique chunks evaluated | 61 |
-| Poison chunks in top-k | 16 |
-| **DBR-B** (poison caught / total poison in top-k) | **56.25%** |
-| **CDR-B** (clean wrongly blocked / total clean in top-k) | **40.00%** |
+| Unique chunks evaluated | 49 |
+| Poison chunks in top-k | 24 |
+| **DBR-B** (poison caught / total poison in top-k) | **0.00%** |
+| **CDR-B** (clean wrongly blocked / total clean in top-k) | **12.00%** |
 
 ### Per-Attack-Type Breakdown
 
 | Attack Type | Queries Hit (RSR) | In Top-K | Caught | DBR-B | Avg Score |
 |-------------|-------------------|----------|--------|-------|-----------|
-| blocker | 9/10 (90%) | 8 | 3 | 38% | 0.338 |
-| hijack | 4/10 (40%) | 5 | 4 | 80% | 0.680 |
-| stealth | 3/10 (30%) | 3 | 2 | 67% | 0.667 |
+| blocker | 10/10 (100%) | 8 | 0 | 0% | 0.417 |
+| hijack | 10/10 (100%) | 8 | 0 | 0% | 0.378 |
+| stealth | 10/10 (100%) | 8 | 0 | 0% | 0.366 |
 
 ---
 

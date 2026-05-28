@@ -144,9 +144,10 @@ src/defense/filter.py
 | Blocker | ❌ 無法偵測 | ⚠️ Stage 2 有效（跨領域注入），同領域 Blocker 仍有盲區 | 中 |
 
 > **實驗結果（experiment_01，10 queries × 3 types = 30 poison，200 clean，40 CDR，gemma4:e4b）**：  
-> Defense A — DBR-A=**50%** / CDR-A=**5%**（blocker=20%、hijack=70%、stealth=60%）；15 blocked，15 inserted。  
-> Defense B — RSR=**90%**（防禦前），DBR-B=**80%** / CDR-B=**42.11%**（blocker=75%、hijack=67%、stealth=100%）。  
-> CDR-B 偏高主因為 Stage 2 離題偵測對同領域 Blocker 的誤判；Stealth 完全被 Stage 1 矛盾偵測清除。
+> Defense A — DBR-A=**46.67%** / CDR-A=**5.00%**（blocker=20%、hijack=50%、stealth=70%）；14 blocked，16 inserted。  
+> Defense B — RSR=**90%**（防禦前，9/10 queries），DBR-B=**56.25%** / CDR-B=**40.00%**（blocker=38%、hijack=80%、stealth=67%）。  
+> CDR-B 偏高主因為 Stage 2 離題偵測對同領域一般法律條款的誤判；Hijack 由 Stage 1 矛盾偵測有效清除（80%）。  
+> **Phase 5 ASR（Voting）= 30%**（3/10 queries：q04 payment/full、q05 confidentiality/full、q06 auto-renewal/partial）。
 
 ---
 
@@ -184,12 +185,75 @@ top-k chunks（Defense B 後）
 
 ---
 
+---
+
+## PPL 困惑度防禦（Ablation）
+
+> **方法**：以 GPT-2 small 計算 chunk 的 global PPL 與 sliding-window spike PPL；超過門檻即視為異常並阻擋。  
+> **假設**：惡意注入文本（LLM 生成）的語言風格與自然文本有差異，PPL 應偏高。  
+> **實作**：`src/defense/filter_PPL.py` — `PPLDefenseFilter`，API 與 `ConsistencyDefenseFilter` 相容。
+
+### 參數設定（`configs/experiment_ppl_defense.yaml`）
+
+| 防禦點 | global PPL 門檻 | spike PPL 門檻 |
+|--------|----------------|---------------|
+| **A（入庫前）** | 80.0 | 120.0 |
+| **B（檢索後）** | 100.0 | 150.0 |
+
+`window_size=50`，`stride=25`，`max_tokens=512`
+
+### 流程
+
+```
+chunk text
+    ↓
+GPT-2 small 計算 global PPL
+    ↓
+  global PPL > threshold → is_malicious=True, score=1.0 → 阻擋
+  否則 → sliding window spike PPL
+    ↓
+  spike PPL > spike_threshold → is_malicious=True, score=1.0 → 阻擋
+  否則 → is_malicious=False, score=0.0 → 放行
+```
+
+### 實驗結果（experiment_ppl_defense，與 Voting 相同語料，gemma4:26b）
+
+> Defense A — DBR-A=**20.00%** / CDR-A=**2.50%**（blocker=20%、hijack=20%、stealth=20%；均勻各擋 2/10）  
+> Defense B — RSR=**100%**（10/10 queries）/ DBR-B=**0.00%** / CDR-B=**12.00%**  
+> **Phase 5 ASR（PPL）= 60%**（6/10 queries：q01、q02、q04、q05、q06、q08）
+
+### 失效根本原因
+
+| 現象 | 原因 |
+|------|------|
+| DBR-A 低（20%）且均勻 | Stealth/Hijack 攻擊文本由 LLM 生成，句式流暢，PPL 與乾淨 chunks 無明顯差距 |
+| DBR-B = 0% | 法律合約原文本身 PPL 天生偏高（法律術語密集、句式固定）；LLM 生成的毒文本語言更流暢，反而 PPL 更低 → **異常信號方向倒置** |
+| CDR-B = 12% | 少數真實合約段落句式罕見，global PPL 超過門檻被誤攔 |
+
+> **結論**：PPL 防禦的假設在法律合約 RAG 場景下不成立——對抗性文本不一定「不流暢」。在 LLM-generated 毒文本的場景下，語義一致性偵測（Voting）顯著優於統計型困惑度過濾。
+
+---
+
+## 兩種防禦方案最終比較
+
+| 指標 | Voting（矛盾+離題偵測） | PPL（GPT-2 困惑度） | 備註 |
+|------|----------------------|-------------------|------|
+| DBR-A | **46.67%** | 20.00% | Voting 對 Stealth/Hijack 更有效 |
+| CDR-A | 5.00% | **2.50%** | PPL 誤攔較低 |
+| RSR（pre-B） | 90.00% | 100.00% | PPL Defense A 攔截少，更多毒 chunk 進 DB |
+| DBR-B | **56.25%** | 0.00% | PPL Defense B 完全失效 |
+| CDR-B | 40.00% | **12.00%** | PPL 誤攔低但防禦無效 |
+| ASR（Phase 5） | **30%** | 60% | Voting 最終防禦效果明確優勝 |
+
+---
+
 ## Ablation 配置
 
 | 設定 | 說明 |
 |------|------|
-| `no_defense` | A、B 均關閉，純攻擊上限（基準線） |
-| `A + B` | 完整兩點防護（本研究主要設定） |
+| `no_defense` | A、B 均關閉，純攻擊上限（基準線，尚未執行） |
+| `A + B（Voting）` | 語料庫一致性投票，完整兩點防護（本研究主要設定） |
+| `A + B（PPL）` | GPT-2 困惑度過濾，Ablation 對照組 |
 
 ---
 

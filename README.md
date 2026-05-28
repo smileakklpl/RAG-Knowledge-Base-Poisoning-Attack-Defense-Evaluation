@@ -213,7 +213,8 @@ seed: 42                           # 隨機種子
 main.py                             # 五階段管線主入口（--phase / --from-phase / --force）
 
 configs/
-└── experiment_01.yaml              # 模型、向量庫、防禦、評估模式設定
+├── experiment_01.yaml              # 主實驗設定（Voting 防禦）
+└── experiment_ppl_defense.yaml     # PPL Ablation 設定（GPT-2 困惑度防禦）
 
 data/
 └── queries.json                    # 規範查詢集（Phase 1、3、5 共用）
@@ -234,7 +235,8 @@ src/
 │   ├── phase4.py                   # 目標 LLM 生成（已完成）
 │   └── phase5.py                   # 人工標註核心邏輯（已完成）
 └── defense/
-    └── filter.py                   # ConsistencyDefenseFilter：矛盾偵測 + 離題偵測
+    ├── filter.py                   # ConsistencyDefenseFilter：矛盾偵測 + 離題偵測（Voting）
+    └── filter_PPL.py               # PPLDefenseFilter：GPT-2 困惑度異常偵測（Ablation）
 
 tools/
 └── annotate.py                     # Phase 5 CLI 入口（import src.pipeline.phase5）
@@ -243,12 +245,12 @@ scripts/
 └── smoke_test.py                   # Phase 1 快速驗證（1 筆查詢、1 輪迭代）
 
 output/                             # 實驗輸出（gitignored，按 phase 分層）
-├── phase1/   poison_chunks.json
-├── phase2/   audit_defense_a.jsonl + report.md
-├── phase3/   retrieval_results.json + audit_defense_b.jsonl + report.md
-├── phase4/   phase4_results.json + report.md
-├── phase5/   phase5_annotated.json + report.md（標註完成後產生）
-└── tests/    smoke_test_result.json
+├── phase1/         poison_chunks.json
+├── phase2/         audit_defense_a.jsonl + report.md          ← Voting
+├── phase3/         retrieval_results.json + audit_defense_b.jsonl + report.md
+├── phase4/         phase4_results.json（含 Phase 5 annotation）+ report.md
+├── ppl_defense/    PPL Ablation 全套輸出（phase2/3/4，結構同上）
+└── tests/          smoke_test_result.json
 
 docs/
 ├── project_background.md
@@ -281,7 +283,7 @@ docs/
 - **LLM 推論**：Ollama（統一接口）
 - **嵌入模型**：bge-m3（語義向量化）
 - **向量資料庫**：Postgres + pgvector（HNSW / IVFFlat 索引）
-- **防禦分類**：語料庫一致性投票 + 離題偵測（LLM-based，見 `docs/defense_methodology.md`）
+- **防禦分類**：語料庫一致性投票 + 離題偵測（LLM-based）；GPT-2 困惑度過濾（PPL Ablation，見 `docs/defense_methodology.md`）
 - **評估方式**：人工 JSON 標註（無 Judge LLM）
 - **執行框架**：原生 Python + Ollama SDK 0.4+
 
@@ -317,30 +319,46 @@ docs/
   - Step B：對每個 query，從 DB 撈出 top-`n_retrieved_per_query` 個最相關的 original chunk
   - Step C：Attacker LLM 以三種手法（Hijack / Blocker / Stealth）修改撈到的 chunk，三個評估器迭代優化
   - `PoisonChunk` 新增 `original_chunk_id` / `original_chunk_text`，供 Phase 2 審計對照
-- [x] **Phase 2** — 重構為「注入嘗試 + 防禦點 A」，實驗結果（experiment_01，30 poison / 200 clean / 40 CDR）：
+- [x] **Phase 2** — 重構為「注入嘗試 + 防禦點 A」，Voting 實驗結果（experiment_01，30 poison / 200 clean / 40 CDR）：
   - DB 已預載乾淨 originals（Phase 1 完成），Phase 2 不再載入 CUAD
   - Defense A（矛盾偵測）→ 阻擋者不入庫；通過者以 `is_original=False` 寫入
   - CDR 測試：額外載入 `n_cdr_chunks=40` 筆 CUAD chunks（seed+1，非 DB 原始集合）量測誤攔率
-  - **DBR-A = 50%**（blocked 15/30）：blocker=20%、hijack=70%、stealth=60%
-  - **CDR-A = 5%**（誤攔 2/40 筆乾淨 chunks）
+  - **DBR-A = 46.67%**（blocked 14/30）：blocker=20%、hijack=50%、stealth=70%
+  - **CDR-A = 5.00%**（誤攔 2/40 筆乾淨 chunks）
 - [x] **Phase 3** — `src/pipeline/phase3.py` 實作完成，10 queries × k=9
   - bge-m3 embed query → pgvector cosine top-k（k=9）
   - Defense B（矛盾偵測 Stage 1 + 離題偵測 Stage 2）→ 物理 DELETE 惡意 chunk
   - Stage 2 針對 Blocker 攻擊：chunk 明顯來自不同法律領域時阻擋（score=0.7）
   - **RSR = 90%**（防禦前，9/10 queries 命中毒 chunk）
-  - **DBR-B = 80%**（毒 chunks 攔截率）：blocker=75%、hijack=67%、stealth=100%
-  - **CDR-B = 42.11%**（乾淨 chunk 誤攔率，偏高，與 Stage 2 離題判斷有關）
+  - **DBR-B = 56.25%**（毒 chunks 攔截率）：blocker=38%、hijack=80%、stealth=67%
+  - **CDR-B = 40.00%**（乾淨 chunk 誤攔率，Stage 2 離題偵測所致）
 - [x] **Phase 4** — `src/pipeline/phase4.py` 實作完成，voting 模式（g=3, α=0.5）
-  - Sanitized context + RAG prompt v1.1 → `gemma4:26b` 批次生成（avg latency ≈ 180s）
+  - Sanitized context + RAG prompt v1.1 → `gemma4:26b` 批次生成（avg latency ≈ 169s/query）
   - 10 entries（10 queries × k=9），9 筆 context 仍含毒 chunk（防禦點 B 漏網）
-  - Voting：3 組 round-robin，avg voted keywords=21.0
-- [x] **Phase 5 標註工具** — `src/pipeline/phase5.py` 核心邏輯 + `tools/annotate.py` CLI 入口
-  - 逐筆顯示 query / 實際注入文字（Phase 1） / model_answer（Phase 4）
-  - 對照 Phase 3 retrieval 記錄，顯示每個 poison chunk 的攻擊類型與 rank
-  - 填寫 `is_poisoned_answer`、`match_level`、`annotator_note`
-  - 支援 Ctrl-C 中途暫停，進度自動儲存；全部標完後自動產生 `output/phase5/report.md`
+  - Voting：3 組 round-robin，avg voted keywords=18.5
+- [x] **Phase 5 標註** — Claude 代標，Voting 實驗標註完成（annotator: Claude，2026-05-28）
+  - **ASR（Voting）= 30%**（3/10：q04 payment/full、q05 confidentiality/full、q06 auto-renewal/partial）
+  - Phase 5 工具：`src/pipeline/phase5.py` 核心邏輯 + `tools/annotate.py` CLI 入口
+- [x] **PPL Ablation** — `src/defense/filter_PPL.py` GPT-2 困惑度過濾（`configs/experiment_ppl_defense.yaml`，輸出至 `output/ppl_defense/`）
+  - Defense A（PPL 門檻：global=80, spike=120）：**DBR-A = 20.00%** / **CDR-A = 2.50%**（各攻擊類型均勻=20%）
+  - Defense B（PPL 門檻：global=100, spike=150）：**RSR = 100%** / **DBR-B = 0.00%** / **CDR-B = 12.00%**
+  - **根本問題**：法律合約原文 GPT-2 PPL 天生偏高；LLM 生成的毒文本語言更流暢，PPL 反而更低 → 異常信號倒置，Defense B 完全失效
+  - **ASR（PPL）= 60%**（6/10：q01、q02、q04、q05、q06、q08）
+
+### 兩種防禦方案比較
+
+| 指標 | Voting（矛盾+離題偵測） | PPL（GPT-2 困惑度） |
+|------|----------------------|-------------------|
+| DBR-A | **46.67%** | 20.00% |
+| CDR-A | 5.00% | **2.50%** |
+| RSR（pre-B） | 90.00% | 100.00% |
+| DBR-B | **56.25%** | 0.00% |
+| CDR-B | 40.00% | **12.00%** |
+| ASR（Phase 5） | **30%** | 60% |
+
+> Voting 在法律合約領域顯著優於 PPL：PPL 的異常信號對 LLM 生成的流暢毒文本失效；Voting 透過語意矛盾偵測與離題判斷實現有效過濾，雖 CDR-B 偏高（40%），但最終 ASR 僅 30%，防禦效果明確。
 
 ### 待完成
 
-- [ ] **Phase 5 人工標註執行** — 執行 `python main.py --phase 5` 完成標註，計算最終 ASR
-- [ ] **資料稀釋防禦實驗** — 設定 `n_clean_chunks=100 / n_poison_chunks=5`，執行 `python main.py --phases 2 3 4 --force`，與 A+B 基準組（200 clean + 30 poison，Phase 5 標完後取 ASR）比較稀釋效果
+- [ ] **無防禦基線實驗** — 執行 `configs/experiment_no_defense.yaml`，取得 ASR 上限（預期接近 RSR=90~100%）
+- [ ] **資料稀釋防禦實驗** — 設定 `n_clean_chunks=100 / n_poison_chunks=5`，比較稀釋效果

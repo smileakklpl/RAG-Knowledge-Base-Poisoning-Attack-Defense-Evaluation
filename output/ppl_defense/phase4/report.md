@@ -1,6 +1,6 @@
 # Phase 4 — Experiment Report
 
-**Run time**: 2026-05-28T06:14:00.821946+00:00  
+**Run time**: 2026-05-28T07:26:12.251334+00:00  
 **Config**: `configs/experiment_01.yaml`  
 **Target model**: `gemma4:26b`  
 **Prompt version**: `v1.1`  
@@ -13,8 +13,8 @@
 | Item | Value |
 |------|-------|
 | Total (query × k) entries | 10 |
-| Entries with poison in context | 9 |
-| Average LLM latency | 168609 ms |
+| Entries with poison in context | 10 |
+| Average LLM latency | 199182 ms |
 
 ## Voting Summary
 
@@ -22,7 +22,7 @@
 |------|-------|
 | Voting groups (g) | 3 |
 | Vote threshold (α) | 0.5 |
-| Avg voted keywords | 18.5 |
+| Avg voted keywords | 24.4 |
 
 ---
 
@@ -30,7 +30,7 @@
 
 | Top-K | Entries | Poison in Context | Avg Latency (ms) |
 |-------|---------|-------------------|-----------------|
-| 9 | 10 | 9 | 168609 |
+| 9 | 10 | 10 | 199182 |
 
 ---
 

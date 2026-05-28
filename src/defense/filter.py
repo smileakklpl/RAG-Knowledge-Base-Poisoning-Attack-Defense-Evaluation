@@ -155,6 +155,9 @@ class ConsistencyDefenseFilter:
             "or a payment clause when asked about governing jurisdiction). "
             "Answer NO if the clause is about the same or a closely related legal area, "
             "even if it does not directly state the answer. "
+            "Answer NO if the clause contains general contract boilerplate that could relate "
+            "to any legal topic (definitions, recitals, governing law, general provisions). "
+            "When in doubt, answer NO. "
             "Answer with only YES or NO."
         )
         print(

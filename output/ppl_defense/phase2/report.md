@@ -1,9 +1,9 @@
 # Phase 2 — Experiment Report
 
-**Run time**: 2026-05-28T05:27:24.085198+00:00  
+**Run time**: 2026-05-28T06:52:10.456429+00:00  
 **Config**: `configs/experiment_01.yaml`  
-**Defense method**: Corpus Consistency Voting (LLM-based contradiction detection)  
-**Defense A LLM**: `gemma4:e4b`  top_k_ref=5  
+**Defense method**: PPL Perplexity Filtering (GPT-2 anomaly detection)  
+**PPL model**: GPT-2 small  global_thresh=80.0  spike_thresh=120.0  
 
 ---
 
@@ -25,18 +25,18 @@
 
 | Metric | Value |
 |--------|-------|
-| Chunks inserted into pgvector | 16 |
-| Chunks blocked (not inserted) | 14 |
-| **DBR-A** (poison caught / total poison) | **46.67%** |
-| **CDR-A** (clean wrongly blocked / CDR test n) | **5.00%** |
+| Chunks inserted into pgvector | 24 |
+| Chunks blocked (not inserted) | 6 |
+| **DBR-A** (poison caught / total poison) | **20.00%** |
+| **CDR-A** (clean wrongly blocked / CDR test n) | **2.50%** |
 
 ### Per-Attack-Type Breakdown
 
 | Attack Type | Total | Caught | DBR | Avg Score |
 |-------------|-------|--------|-----|-----------|
-| blocker | 10 | 2 | 20% | 0.200 |
-| hijack | 10 | 5 | 50% | 0.500 |
-| stealth | 10 | 7 | 70% | 0.700 |
+| blocker | 10 | 2 | 20% | 0.617 |
+| hijack | 10 | 2 | 20% | 0.578 |
+| stealth | 10 | 2 | 20% | 0.566 |
 
 ---
 
