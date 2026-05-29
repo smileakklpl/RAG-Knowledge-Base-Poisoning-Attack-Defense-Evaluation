@@ -130,7 +130,7 @@ output/
 │   ├── phase2/   audit_defense_a.jsonl + report.md
 │   ├── phase3/   retrieval_results.json + audit_defense_b.jsonl + report.md
 │   ├── phase4/   phase4_results.json + report.md
-│   └── phase5/   phase5_annotated.json
+│   └── phase5/   phase5_annotated.json + report.md
 ├── ppl_defense/   # PPL Ablation（phase2–5）
 └── no_defense/    # 無防禦基準線（phase1–5）
 ```

@@ -253,7 +253,7 @@ output/                             # 實驗輸出（gitignored，按實驗分�
 │   ├── phase2/   audit_defense_a.jsonl + report.md
 │   ├── phase3/   retrieval_results.json + audit_defense_b.jsonl + report.md
 │   ├── phase4/   phase4_results.json（含 annotation）+ report.md
-│   └── phase5/   phase5_annotated.json
+│   └── phase5/   phase5_annotated.json + report.md
 ├── ppl_defense/    PPL Ablation（--output-dir output/ppl_defense）
 │   └── phase2/3/4/5/（結構同上，無 phase1）
 ├── no_defense/     無防禦基準線（--output-dir output/no_defense）
