@@ -189,7 +189,7 @@ top-k chunks（Defense B 後）
 
 ## PPL 困惑度防禦（Ablation）
 
-> **方法**：以 GPT-2 small 計算 chunk 的 global PPL 與 sliding-window spike PPL；超過門檻即視為異常並阻擋。  
+> **方法來源**：RAGuard: Secure RAG against Poisoning Attacks (2025) 提出的 Chunk-wise Perplexity Filtering，本研究以 GPT-2 small 實作 global PPL 與 sliding-window spike PPL 作為 Ablation 對照組。  
 > **假設**：惡意注入文本（LLM 生成）的語言風格與自然文本有差異，PPL 應偏高。  
 > **實作**：`src/defense/filter_PPL.py` — `PPLDefenseFilter`，API 與 `ConsistencyDefenseFilter` 相容。
 
@@ -264,9 +264,11 @@ GPT-2 small 計算 global PPL
 
 1. **RobustRAG** — Xiang et al., *"Certifiably Robust RAG against Retrieval Corruption"*, arXiv: 2405.15556 (2024)
    - Isolate-then-Aggregate 策略；keyword-based 與 decoding-based aggregation；可認證 robustness 保證
+   - **本研究應用**：Phase 4 Voting 生成策略（g=3 groups, α=0.5）
 
 2. **PoisonedRAG** — Wei Zou et al., *"PoisonedRAG: Knowledge Corruption Attacks to RAG of Large Language Models"*, USENIX Security 2025. arXiv: 2402.07867
    - 攻擊框架來源；三種攻擊類型定義（Hijack / Blocker / Stealth）
 
-3. **ContextCite** — *"ContextCite: Attributing Model Generation to Context"*, NeurIPS 2024
-   - Post-hoc attribution：追溯 LLM 輸出至 source chunk；計算代價為原始 inference 的 32 倍，暫未實作
+3. **RAGuard** — *"RAGuard: Secure RAG against Poisoning Attacks"* (2025)
+   - 非參數化防禦框架；Chunk-wise Perplexity Filtering 機制
+   - **本研究應用**：PPL Ablation 實驗設計靈感來源（`experiment_ppl_defense`）

@@ -27,6 +27,9 @@ env/
 .DS_Store
 Thumbs.db
 
+# ── 階段性產物 ──────────────────────────────────────────────────
+實驗結果說明.md
+experiment_results.md
 # ── 實驗輸出（按 phase 分層）────────────────────────────────
 #output/phase1/
 #output/phase2/
