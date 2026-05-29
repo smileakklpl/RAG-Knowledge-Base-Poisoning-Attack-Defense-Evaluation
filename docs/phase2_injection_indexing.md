@@ -12,9 +12,9 @@
 
 | 項目 | 內容 |
 |------|------|
-| **輸入** | `output/phase1/poison_chunks.json`（攻擊者的修改版 chunks） |
+| **輸入** | `output/<output_dir>/phase1/poison_chunks.json`（攻擊者的修改版 chunks） |
 | **輸出（DB）** | pgvector 中追加通過防禦的 poison chunks（`is_original=False, is_poison=True`） |
-| **輸出（檔案）** | `output/phase2/audit_defense_a.jsonl`（每筆 chunk 的防禦判定記錄）<br/>`output/phase2/report.md` |
+| **輸出（檔案）** | `output/<output_dir>/phase2/audit_defense_a.jsonl`（每筆 chunk 的防禦判定記錄）<br/>`output/<output_dir>/phase2/report.md` |
 | **執行約束** | 需要 Embedding Model（bge-m3）+ LLM（gemma4:e4b 矛盾偵測）；Ollama 本地推論 |
 
 ---
@@ -142,7 +142,7 @@ CDR 紀錄以 `"split": "cdr"` 標記，一起存入 `audit_defense_a.jsonl`。
 ```python
 import json
 
-records = [json.loads(l) for l in open("output/phase2/audit_defense_a.jsonl")]
+records = [json.loads(l) for l in open("output/voting/phase2/audit_defense_a.jsonl")]  # 依 --output-dir 調整
 poison  = [r for r in records if r["split"] == "poison"]
 cdr     = [r for r in records if r["split"] == "cdr"]
 
@@ -166,18 +166,19 @@ CDR_A = sum(r["predicted_is_malicious"] for r in cdr)    / len(cdr)
 | 指標 | 值 |
 |------|---|
 | Poison chunks 送入 | 30（10 queries × 3 types） |
-| 被 Defense A 阻擋 | 15（50%） |
-| 成功注入 pgvector | 15 |
-| **DBR-A** | **50%** |
-| **CDR-A** | **5%**（40 筆乾淨 CDR chunks，2 筆誤攔） |
+| 被 Defense A 阻擋 | 14（46.67%） |
+| 成功注入 pgvector | 16 |
+| **DBR-A** | **46.67%** |
+| **CDR-A** | **5.00%**（40 筆乾淨 CDR chunks，2 筆誤攔） |
 
 | 攻擊類型 | Total | Caught | DBR | Avg Score |
 |---------|-------|--------|-----|-----------|
 | blocker | 10 | 2 | 20% | 0.200 |
-| hijack  | 10 | 7 | 70% | 0.700 |
-| stealth | 10 | 6 | 60% | 0.600 |
+| hijack  | 10 | 5 | 50% | 0.500 |
+| stealth | 10 | 7 | 70% | 0.700 |
 
-> Blocker DBR 最低（20%）：Blocker 不引入事實矛盾，Stage 1 矛盾偵測幾乎無效，需靠 Defense B Stage 2 離題偵測補救。
+> Blocker DBR 最低（20%）：Blocker 不引入事實矛盾，Stage 1 矛盾偵測幾乎無效，需靠 Defense B Stage 2 離題偵測補救。  
+> Stealth DBR 最高（70%）：細微數值替換被 LLM 矛盾偵測有效識別。
 
 ---
 

@@ -1,7 +1,5 @@
-# RAG 知識庫資料中毒：攻擊與防禦評估
+# RAG Knowledge Base Poisoning: Attack & Defense Evaluation
 ## RAG Knowledge Base Poisoning: Attack & Defense Evaluation
-
-基於迭代對抗的 RAG 資料中毒攻擊測試流程
 
 ---
 
@@ -53,25 +51,29 @@ docker exec -it rag_poison_db psql -U postgres -d rag_poison -c "\dx"
 ### 4. 完整實驗流程
 
 ```bash
-# ── 首次執行：完整五階段 ──────────────────────────────────
-python main.py
+# ── Voting（主實驗，輸出至 output/voting/）────────────────
+python main.py                          # 完整五階段
+python main.py --phases 2 3 4 --force  # 重跑 Phase 2–4
 
-# ── 單獨執行特定 Phase ────────────────────────────────────
+# ── PPL Ablation（輸出至 output/ppl_defense/）────────────
+python main.py --config configs/experiment_ppl_defense.yaml \
+               --output-dir output/ppl_defense \
+               --phase1-dir output/voting \
+               --phases 2 3 4 --force
+
+# ── 無防禦基準線（輸出至 output/no_defense/）─────────────
+python main.py --config configs/experiment_no_defense.yaml \
+               --output-dir output/no_defense \
+               --phases 1 2 3 4 --force
+
+# ── 單獨執行特定 Phase（Voting）───────────────────────────
 python main.py --phase 1          # 攻擊文本生成
 python main.py --phase 2          # 入庫 + 防禦點 A
 python main.py --phase 3          # 檢索 + 防禦點 B
 python main.py --phase 4          # 目標 LLM 生成回答
 python main.py --phase 5          # 人工標註（互動式）
 
-# ── 從指定 Phase 繼續（前面已跑完）───────────────────────
-python main.py --from-phase 3
-
-# ── 強制重跑（無視既有輸出）──────────────────────────────
-python main.py --phases 2 3 4 --force   # 重跑 Phase 2–4
-python main.py --force                  # 重跑全部
-
-# ── Phase 5 標註（可隨時繼續，進度自動儲存）──────────────
-python main.py --phase 5
+# ── Phase 5 標註工具────────────────────────────────────
 python tools/annotate.py --annotator WL
 ```
 
@@ -112,11 +114,11 @@ seed: 42                           # 隨機種子
 
 | 階段 | 目的 | 輸入 | 輸出 |
 |------|------|------|------|
-| **Phase 1** | 預載乾淨 DB + 攻擊文本生成<br/>（撈出 chunk → 修改） | `data/queries.json`<br/>+ CUAD（自動從 HF Hub 下載） | pgvector（乾淨原始 chunks）<br/>`output/phase1/poison_chunks.json` |
-| **Phase 2** | 注入嘗試 + **防禦點 A**<br/>（入庫前過濾） | Phase 1 poison chunks | pgvector（通過者注入）<br/>`output/phase2/audit_defense_a.jsonl` |
-| **Phase 3** | 檢索 + **防禦點 B**<br/>（檢索後過濾） | 查詢集 + 向量庫 | `output/phase3/retrieval_results.json`<br/>`output/phase3/audit_defense_b.jsonl` |
-| **Phase 4** | 目標 LLM 生成回答 | Sanitized Context | `output/phase4/phase4_results.json` |
-| **Phase 5** | 人工評估 | Phase 4 輸出 JSON | `output/phase5/phase5_annotated.json` |
+| **Phase 1** | 預載乾淨 DB + 攻擊文本生成<br/>（撈出 chunk → 修改） | `data/queries.json`<br/>+ CUAD（自動從 HF Hub 下載） | pgvector（乾淨原始 chunks）<br/>`output/{experiment}/phase1/poison_chunks.json` |
+| **Phase 2** | 注入嘗試 + **防禦點 A**<br/>（入庫前過濾） | Phase 1 poison chunks | pgvector（通過者注入）<br/>`output/{experiment}/phase2/audit_defense_a.jsonl` |
+| **Phase 3** | 檢索 + **防禦點 B**<br/>（檢索後過濾） | 查詢集 + 向量庫 | `output/{experiment}/phase3/retrieval_results.json`<br/>`output/{experiment}/phase3/audit_defense_b.jsonl` |
+| **Phase 4** | 目標 LLM 生成回答 | Sanitized Context | `output/{experiment}/phase4/phase4_results.json` |
+| **Phase 5** | 人工評估 | Phase 4 輸出 JSON | `output/{experiment}/phase5/phase5_annotated.json` |
 
 ---
 
@@ -214,7 +216,8 @@ main.py                             # 五階段管線主入口（--phase / --fro
 
 configs/
 ├── experiment_01.yaml              # 主實驗設定（Voting 防禦）
-└── experiment_ppl_defense.yaml     # PPL Ablation 設定（GPT-2 困惑度防禦）
+├── experiment_ppl_defense.yaml     # PPL Ablation 設定（GPT-2 困惑度防禦）
+└── experiment_no_defense.yaml      # 無防禦基準線設定
 
 data/
 └── queries.json                    # 規範查詢集（Phase 1、3、5 共用）
@@ -244,13 +247,18 @@ tools/
 scripts/
 └── smoke_test.py                   # Phase 1 快速驗證（1 筆查詢、1 輪迭代）
 
-output/                             # 實驗輸出（gitignored，按 phase 分層）
-├── phase1/         poison_chunks.json
-├── phase2/         audit_defense_a.jsonl + report.md          ← Voting
-├── phase3/         retrieval_results.json + audit_defense_b.jsonl + report.md
-├── phase4/         phase4_results.json（含 Phase 5 annotation）+ report.md
-├── ppl_defense/    PPL Ablation 全套輸出（phase2/3/4，結構同上）
-└── tests/          smoke_test_result.json
+output/                             # 實驗輸出（gitignored，按實驗分層）
+├── voting/         Corpus Consistency Voting（主實驗，--output-dir 預設值）
+│   ├── phase1/   poison_chunks.json
+│   ├── phase2/   audit_defense_a.jsonl + report.md
+│   ├── phase3/   retrieval_results.json + audit_defense_b.jsonl + report.md
+│   ├── phase4/   phase4_results.json（含 annotation）+ report.md
+│   └── phase5/   phase5_annotated.json
+├── ppl_defense/    PPL Ablation（--output-dir output/ppl_defense）
+│   └── phase2/3/4/5/（結構同上，無 phase1）
+├── no_defense/     無防禦基準線（--output-dir output/no_defense）
+│   └── phase1/2/3/4/5/（結構同上）
+└── tests/          早期測試產物（mini_*.json、smoke_test_result.json、report.md）
 
 docs/
 ├── project_background.md
@@ -344,21 +352,25 @@ docs/
   - Defense B（PPL 門檻：global=100, spike=150）：**RSR = 100%** / **DBR-B = 0.00%** / **CDR-B = 12.00%**
   - **根本問題**：法律合約原文 GPT-2 PPL 天生偏高；LLM 生成的毒文本語言更流暢，PPL 反而更低 → 異常信號倒置，Defense B 完全失效
   - **ASR（PPL）= 60%**（6/10：q01、q02、q04、q05、q06、q08）
+- [x] **無防禦基線實驗** — `configs/experiment_no_defense.yaml`，輸出至 `output/no_defense/`
+  - Defense A/B 均關閉，`defense_mode: standard`（無 Voting），標準 RAG 直接回答
+  - **RSR = 100%**（10/10 queries 全部命中毒 chunk，30/30 毒 chunks 全數入庫）
+  - **ASR（No Defense）= 90%**（9/10：唯 q09 LLM 自行排斥「無因 48 小時終止」的不合理 payload）
 
-### 兩種防禦方案比較
+### 三實驗最終比較
 
-| 指標 | Voting（矛盾+離題偵測） | PPL（GPT-2 困惑度） |
-|------|----------------------|-------------------|
-| DBR-A | **46.67%** | 20.00% |
-| CDR-A | 5.00% | **2.50%** |
-| RSR（pre-B） | 90.00% | 100.00% |
-| DBR-B | **56.25%** | 0.00% |
-| CDR-B | 40.00% | **12.00%** |
-| ASR（Phase 5） | **30%** | 60% |
+| 指標 | No Defense（基準線） | PPL（GPT-2 困惑度） | Voting（矛盾+離題偵測） |
+|------|-------------------|-------------------|----------------------|
+| DBR-A | 0% | 20.00% | **46.67%** |
+| CDR-A | 0% | **2.50%** | 5.00% |
+| RSR（pre-B） | 100% | 100% | **90%** |
+| DBR-B | 0% | 0% | **56.25%** |
+| CDR-B | 0% | **12.00%** | 40.00% |
+| **ASR（Phase 5）** | 90% | 60% | **30%** |
+| **ASR 降幅 vs 基準** | — | ▼30pp | **▼60pp** |
 
-> Voting 在法律合約領域顯著優於 PPL：PPL 的異常信號對 LLM 生成的流暢毒文本失效；Voting 透過語意矛盾偵測與離題判斷實現有效過濾，雖 CDR-B 偏高（40%），但最終 ASR 僅 30%，防禦效果明確。
+> **結論**：Voting 防禦將 ASR 從基準 90% 降至 30%，攻擊成功率減少 67%；PPL 防禦僅降至 60%，效果有限。PPL 的失效根因是法律合約 domain 中異常信號倒置（LLM 毒文本 PPL 反低），Voting 的語意矛盾偵測不受此影響。
 
 ### 待完成
 
-- [ ] **無防禦基線實驗** — 執行 `configs/experiment_no_defense.yaml`，取得 ASR 上限（預期接近 RSR=90~100%）
 - [ ] **資料稀釋防禦實驗** — 設定 `n_clean_chunks=100 / n_poison_chunks=5`，比較稀釋效果

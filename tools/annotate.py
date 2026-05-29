@@ -3,7 +3,7 @@ tools/annotate.py — Phase 5 人工標註 CLI 入口
 
 用法：
     python tools/annotate.py
-    python tools/annotate.py --input  output/phase4/phase4_results.json
+    python tools/annotate.py --input  output/voting/phase4/phase4_results.json
     python tools/annotate.py --annotator WL
 """
 

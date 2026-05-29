@@ -31,4 +31,4 @@
 - `match_level` values: `none` / `partial` / `full`
   (whether the model answer reflects `malicious_payload`)
 - Run Phase 5 annotation: `python main.py --phase 5`
-- Full results with model answers: `output/phase4/phase4_results.json`
+- Full results with model answers: `output/tests/phase4_results.json`

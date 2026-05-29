@@ -61,10 +61,14 @@ class ExperimentConfig:
         "user":     "postgres",
         "table":    "chunks",
     })
+    # Set by from_yaml(); not read from YAML
+    config_path: str = field(default="configs/experiment_01.yaml", repr=False, compare=False)
 
     @classmethod
     def from_yaml(cls, path: str) -> "ExperimentConfig":
         with open(path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
         known = {f.name for f in fields(cls)}
-        return cls(**{k: v for k, v in data.items() if k in known})
+        cfg = cls(**{k: v for k, v in data.items() if k in known})
+        cfg.config_path = path
+        return cfg

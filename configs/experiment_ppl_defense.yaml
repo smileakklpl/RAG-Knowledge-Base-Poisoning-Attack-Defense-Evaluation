@@ -8,10 +8,10 @@
 #
 # 用途：量測 PPL 防禦 vs Corpus Consistency Voting 的 DBR / CDR / ASR 差異
 #
-# 執行（Phase 1 共用 output/phase1/poison_chunks.json，不重跑）：
+# 執行（Phase 1 共用 output/voting/phase1/poison_chunks.json，不重跑）：
 #   python main.py --config configs/experiment_ppl_defense.yaml \
 #                  --output-dir output/ppl_defense \
-#                  --phase1-dir output \
+#                  --phase1-dir output/voting \
 #                  --phases 2 3 4 --force
 
 attacker_model:  "gemma4:e4b"

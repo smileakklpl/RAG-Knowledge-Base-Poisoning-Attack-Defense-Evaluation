@@ -305,7 +305,7 @@ def _write_report(path: Path, results: list[dict], config, prompt_version: str =
         "# Phase 4 — Experiment Report",
         "",
         f"**Run time**: {_now_iso()}  ",
-        f"**Config**: `configs/experiment_01.yaml`  ",
+        f"**Config**: `{config.config_path}`  ",
         f"**Target model**: `{config.target_model}`  ",
         f"**Prompt version**: `{prompt_version}`  ",
         f"**Defense mode**: `{mode}`  ",
@@ -358,7 +358,7 @@ def _write_report(path: Path, results: list[dict], config, prompt_version: str =
         "- `match_level` values: `none` / `partial` / `full`",
         "  (whether the model answer reflects `malicious_payload`)",
         "- Run Phase 5 annotation: `python main.py --phase 5`",
-        "- Full results with model answers: `output/phase4/phase4_results.json`",
+        f"- Full results with model answers: `{path.parent / 'phase4_results.json'}`",
     ]
 
     path.parent.mkdir(parents=True, exist_ok=True)

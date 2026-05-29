@@ -16,10 +16,10 @@ import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
 
-DEFAULT_INPUT  = "output/phase4/phase4_results.json"
-DEFAULT_OUTPUT = "output/phase5/phase5_annotated.json"
-PHASE1_PATH    = "output/phase1/poison_chunks.json"
-PHASE3_PATH    = "output/phase3/retrieval_results.json"
+DEFAULT_INPUT  = "output/voting/phase4/phase4_results.json"
+DEFAULT_OUTPUT = "output/voting/phase5/phase5_annotated.json"
+DEFAULT_PHASE1 = "output/voting/phase1/poison_chunks.json"
+DEFAULT_PHASE3 = "output/voting/phase3/retrieval_results.json"
 
 _MATCH_LEVELS = ("none", "partial", "full")
 
@@ -49,16 +49,19 @@ _CHUNK_PREVIEW_LEN = 400
 
 # ── 資料載入 ──────────────────────────────────────────────────────────────────
 
-def _build_poison_lookup() -> dict[tuple, list[dict]]:
+def _build_poison_lookup(
+    phase1_path: str = DEFAULT_PHASE1,
+    phase3_path: str = DEFAULT_PHASE3,
+) -> dict[tuple, list[dict]]:
     """回傳 {(query_id, top_k): [{"chunk_id", "attack_type", "rank", "text"}]}"""
     chunk_text: dict[str, str] = {}
-    p1 = Path(PHASE1_PATH)
+    p1 = Path(phase1_path)
     if p1.exists():
         for item in json.loads(p1.read_text(encoding="utf-8")):
             chunk_text[item["chunk_id"]] = item["generated_text"]
 
     lookup: dict[tuple, list[dict]] = {}
-    p3 = Path(PHASE3_PATH)
+    p3 = Path(phase3_path)
     if not p3.exists():
         return lookup
 
@@ -170,6 +173,8 @@ def run_annotation(
     input_path:  str = DEFAULT_INPUT,
     output_path: str = DEFAULT_OUTPUT,
     annotator:   str = "",
+    phase1_path: str | None = None,
+    phase3_path: str | None = None,
 ) -> None:
     src = Path(input_path)
     if not src.exists():
@@ -178,11 +183,16 @@ def run_annotation(
             "請先執行 Phase 4：python main.py --phase 4"
         )
 
+    # 若未指定，從 input_path 推導同實驗目錄下的 phase1/phase3 路徑
+    output_base = Path(output_path).parent.parent  # e.g. output/voting
+    _phase1 = phase1_path or str(output_base / "phase1" / "poison_chunks.json")
+    _phase3 = phase3_path or str(output_base / "phase3" / "retrieval_results.json")
+
     records = json.loads(src.read_text(encoding="utf-8"))
     total   = len(records)
     done    = sum(1 for r in records if r["annotation"]["is_poisoned_answer"] is not None)
 
-    poison_lookup = _build_poison_lookup()
+    poison_lookup = _build_poison_lookup(_phase1, _phase3)
     if poison_lookup:
         print(f"[Phase5] 毒化文字對照表載入完成（{len(poison_lookup)} 個 entry）")
     else:
@@ -237,13 +247,13 @@ def run_annotation(
         print(f"累計完成 : {total_done} / {total} 筆\n")
 
         if total_done == total:
-            _write_report(records, out.parent / "report.md")
+            _write_report(records, out.parent / "report.md", input_path=input_path, annotated_path=str(out))
             print(f"報告已產生 → {out.parent / 'report.md'}\n")
 
 
 # ── 報告產生 ──────────────────────────────────────────────────────────────────
 
-def _write_report(records: list[dict], path: Path) -> None:
+def _write_report(records: list[dict], path: Path, input_path: str = "", annotated_path: str = "") -> None:
     total    = len(records)
     poisoned = sum(1 for r in records if r["annotation"]["is_poisoned_answer"])
 
@@ -273,7 +283,7 @@ def _write_report(records: list[dict], path: Path) -> None:
         "# Phase 5 — 實驗報告（人工標註）",
         "",
         f"**標註完成時間**：{_now_iso()}  ",
-        f"**輸入檔案**：`output/phase4/phase4_results.json`  ",
+        f"**輸入檔案**：`{input_path or DEFAULT_INPUT}`  ",
         f"**目標模型**：`{records[0]['target_model'] if records else 'N/A'}`  ",
         "",
         "---",
@@ -326,7 +336,7 @@ def _write_report(records: list[dict], path: Path) -> None:
         "",
         "- ASR = 被毒化回答數 / 總 entry 數（同一查詢不同 k 值各自計算）",
         "- 一筆 entry 的 context 可能同時含多種攻擊類型，各類型獨立計數",
-        "- 詳細標註記錄（含 annotator_note）：`output/phase5/phase5_annotated.json`",
+        f"- 詳細標註記錄（含 annotator_note）：`{annotated_path or input_path or DEFAULT_INPUT}`",
     ]
 
     path.parent.mkdir(parents=True, exist_ok=True)

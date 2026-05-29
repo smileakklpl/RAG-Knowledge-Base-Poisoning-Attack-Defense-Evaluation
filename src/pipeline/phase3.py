@@ -251,7 +251,12 @@ def _make_defense_filter_b(config, conn):
 
 
 def _defense_method_label(config) -> str:
-    method = (getattr(config, "defense", {}) or {}).get("method", "voting")
+    defense = getattr(config, "defense", {}) or {}
+    pre  = (defense.get("pre_injection",  {}) or {}).get("enabled", True)
+    post = (defense.get("post_retrieval", {}) or {}).get("enabled", True)
+    if not pre and not post:
+        return "No Defense (Disabled)"
+    method = defense.get("method", "voting")
     return (
         "PPL Perplexity Filtering (GPT-2 anomaly detection)"
         if method == "ppl" else
@@ -323,7 +328,7 @@ def _write_report(
         "# Phase 3 — Experiment Report",
         "",
         f"**Run time**: {_now_iso()}  ",
-        f"**Config**: `configs/experiment_01.yaml`  ",
+        f"**Config**: `{config.config_path}`  ",
         f"**Defense method**: {defense_method}  ",
         *(
             [f"**Defense B LLM**: `{config.defense.get('llm_model', 'gemma4:e4b')}`  "
@@ -375,8 +380,8 @@ def _write_report(
         "- RSR measures attack strength (before defense); DBR-B measures defense effectiveness at B",
         "- Stealth attacks alter key facts while maintaining semantic similarity; consistency voting targets this",
         "- Physical DELETE applied incrementally: earlier queries' deletions affect later queries",
-        "- Retrieval results with sanitized context: `output/phase3/retrieval_results.json`",
-        "- Per-chunk audit log: `output/phase3/audit_defense_b.jsonl`",
+        f"- Retrieval results with sanitized context: `{path.parent / 'retrieval_results.json'}`",
+        f"- Per-chunk audit log: `{path.parent / 'audit_defense_b.jsonl'}`",
     ]
 
     path.parent.mkdir(parents=True, exist_ok=True)

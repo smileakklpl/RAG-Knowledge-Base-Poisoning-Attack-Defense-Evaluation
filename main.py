@@ -8,13 +8,19 @@ main.py — RAG 知識庫污染攻擊與防禦評估管線
   Phase 4  目標生成   → <output>/phase4/phase4_results.json
   Phase 5  人工標註   → <output>/phase5/phase5_annotated.json（互動式 CLI）
 
+實驗輸出目錄（--output-dir）：
+  output/voting/       — Corpus Consistency Voting（主實驗，預設值）
+  output/ppl_defense/  — PPL 困惑度過濾（Ablation）
+  output/no_defense/   — 無防禦基準線
+
 用法：
-    python main.py                                           # 完整五階段（預設 config + output/）
+    python main.py                                           # 完整五階段（預設 config + output/voting/）
     python main.py --phases 1 2 3 4                         # 跳過 Phase 5
     python main.py --from-phase 3                           # 從 Phase 3 繼續
     python main.py --phase 1                                # 單獨執行 Phase 1
     python main.py --force                                  # 無視現有輸出，重新執行全部
     python main.py --config configs/experiment_no_defense.yaml --output-dir output/no_defense --phases 1 2 3 4 --force
+    python main.py --config configs/experiment_ppl_defense.yaml --output-dir output/ppl_defense --phase1-dir output/voting --phases 2 3 4 --force
 """
 
 import argparse
@@ -26,7 +32,7 @@ from pathlib import Path
 from src.config import ExperimentConfig
 
 DEFAULT_CONFIG     = "configs/experiment_01.yaml"
-DEFAULT_OUTPUT_DIR = "output"
+DEFAULT_OUTPUT_DIR = "output/voting"
 QUERIES_PATH       = "data/queries.json"
 
 PHASE_NAMES = {

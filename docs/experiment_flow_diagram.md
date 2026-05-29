@@ -86,15 +86,15 @@
                                        ▼
         ┌──────────────────────────────────────────────────┐
         │  輸出: phase4_results.json                        │
-        │  (phase5.attack_success = null, 待人工填寫)       │
+        │  (annotation.is_poisoned_answer = null, 待人工填寫) │
         └──────────────────────────────┬───────────────────┘
                                        │
                                        ▼
         ┌──────────────────────────────────────────────────┐
         │  Phase 5: 人工評估                                │
         │  • 不再使用 Judge LLM                            │
-        │  • 標註者依攻擊類型分別判定 attack_success         │
-        │  • 補上 annotator / annotated_at / reason         │
+        │  • 標註者依攻擊類型分別判定 is_poisoned_answer     │
+        │  • 補上 match_level / annotator_note / annotated_at │
         │  • 多人標註時計算 Cohen's Kappa                  │
         └──────────────────────────────┬───────────────────┘
                                        │
@@ -216,11 +216,11 @@ defense:
 ## 開發進度
 
 - [x] **Phase 1** — 預載 DB + 攻擊文本生成（撈出→修改，已實作）
-- [x] **Phase 2** — 注入嘗試 + 防禦點 A（DBR-A=50%, CDR-A=5%）
-- [x] **Phase 3** — 檢索 + 防禦點 B（RSR=90%, DBR-B=80%, CDR-B=42.11%）
-- [x] **Phase 4** — 目標 LLM 生成回答，voting 模式（g=3, α=0.5）
-- [ ] **Phase 5** — 人工評估（JSON 標註 → ASR，待執行）
-- [x] **防禦方法論** — 語料庫一致性投票（LLM 矛盾偵測 + 離題偵測）
+- [x] **Phase 2** — 注入嘗試 + 防禦點 A（DBR-A=46.67%, CDR-A=5.00%）
+- [x] **Phase 3** — 檢索 + 防禦點 B（RSR=90%, DBR-B=56.25%, CDR-B=40.00%）
+- [x] **Phase 4** — 目標 LLM 生成回答，voting 模式（g=3, α=0.5，avg latency≈169s）
+- [x] **Phase 5** — 人工評估（Claude 代標，Voting ASR=30%、PPL ASR=60%、No Defense ASR=90%）
+- [x] **防禦方法論** — 語料庫一致性投票（LLM 矛盾偵測 + 離題偵測）+ PPL 困惑度過濾（Ablation）
 
 ---
 

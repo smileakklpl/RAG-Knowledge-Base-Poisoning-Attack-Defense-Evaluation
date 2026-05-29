@@ -10,7 +10,7 @@ Phase 2 — Injection + Pre-Storage Defense (Defense Point A)
   1. 載入 Phase 1 輸出的 poison chunks
   2. 對每筆 poison chunk 跑 Defense A（一致性比對）：惡意→跳過；乾淨→嵌入寫入
   3. CDR 測試：載入額外乾淨 CUAD chunks（非 DB 原始集合），量測誤判率
-  4. 寫出 output/phase2/audit_defense_a.jsonl + report.md
+  4. 寫出 <output_dir>/phase2/audit_defense_a.jsonl + report.md
 """
 
 import json
@@ -276,7 +276,12 @@ def _make_defense_filter_a(config, conn):
 
 
 def _defense_method_label(config) -> str:
-    method = (getattr(config, "defense", {}) or {}).get("method", "voting")
+    defense = getattr(config, "defense", {}) or {}
+    pre  = (defense.get("pre_injection",  {}) or {}).get("enabled", True)
+    post = (defense.get("post_retrieval", {}) or {}).get("enabled", True)
+    if not pre and not post:
+        return "No Defense (Disabled)"
+    method = defense.get("method", "voting")
     return (
         "PPL Perplexity Filtering (GPT-2 anomaly detection)"
         if method == "ppl" else
@@ -324,7 +329,7 @@ def _write_report(
         "# Phase 2 — Experiment Report",
         "",
         f"**Run time**: {_now_iso()}  ",
-        f"**Config**: `configs/experiment_01.yaml`  ",
+        f"**Config**: `{config.config_path}`  ",
         f"**Defense method**: {defense_method}  ",
         *(
             [f"**Defense A LLM**: `{config.defense.get('llm_model', 'gemma4:e4b')}`  "
@@ -377,7 +382,7 @@ def _write_report(
         f"- `n_clean_chunks={config.n_clean_chunks}` — Phase 1 預載乾淨 chunks 數量",
         f"- `n_cdr_chunks={getattr(config, 'n_cdr_chunks', 20)}` — CDR 測試用 CUAD chunks（seed+1，非 DB 原始集合）",
         "- DBR-A 低代表惡意 chunk 的語意與乾淨語料高度相似，LLM 難以區分",
-        "- Audit log: `output/phase2/audit_defense_a.jsonl`",
+        f"- Audit log: `{path.parent / 'audit_defense_a.jsonl'}`",
     ]
 
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -45,4 +45,4 @@
 - `n_clean_chunks=200` — Phase 1 預載乾淨 chunks 數量
 - `n_cdr_chunks=40` — CDR 測試用 CUAD chunks（seed+1，非 DB 原始集合）
 - DBR-A 低代表惡意 chunk 的語意與乾淨語料高度相似，LLM 難以區分
-- Audit log: `output/phase2/audit_defense_a.jsonl`
+- Audit log: `output/voting/phase2/audit_defense_a.jsonl`

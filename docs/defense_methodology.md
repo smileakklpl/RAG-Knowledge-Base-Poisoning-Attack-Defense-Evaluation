@@ -234,26 +234,29 @@ GPT-2 small 計算 global PPL
 
 ---
 
-## 兩種防禦方案最終比較
+## 三實驗最終比較
 
-| 指標 | Voting（矛盾+離題偵測） | PPL（GPT-2 困惑度） | 備註 |
-|------|----------------------|-------------------|------|
-| DBR-A | **46.67%** | 20.00% | Voting 對 Stealth/Hijack 更有效 |
-| CDR-A | 5.00% | **2.50%** | PPL 誤攔較低 |
-| RSR（pre-B） | 90.00% | 100.00% | PPL Defense A 攔截少，更多毒 chunk 進 DB |
-| DBR-B | **56.25%** | 0.00% | PPL Defense B 完全失效 |
-| CDR-B | 40.00% | **12.00%** | PPL 誤攔低但防禦無效 |
-| ASR（Phase 5） | **30%** | 60% | Voting 最終防禦效果明確優勝 |
+| 指標 | No Defense（基準線） | PPL（GPT-2 困惑度） | Voting（矛盾+離題偵測） | 備註 |
+|------|-------------------|-------------------|----------------------|------|
+| DBR-A | 0% | 20.00% | **46.67%** | Voting 對 Stealth/Hijack 最有效 |
+| CDR-A | 0% | **2.50%** | 5.00% | PPL 誤攔最低 |
+| RSR（pre-B） | 100% | 100% | **90%** | Voting Defense A 已攔截部分毒 chunk |
+| DBR-B | 0% | 0% | **56.25%** | PPL Defense B 完全失效 |
+| CDR-B | 0% | **12.00%** | 40.00% | Voting CDR-B 偏高（Stage 2 副作用） |
+| **ASR（Phase 5）** | 90% | 60% | **30%** | Voting 最終效果顯著優勝 |
+| **ASR 降幅 vs 基準** | — | ▼30pp | **▼60pp** | Voting 攻擊成功率減少 67% |
+
+> **結論**：Voting 防禦將 ASR 從基準線 90% 降至 30%（減少 67%）；PPL 僅降至 60%。PPL 在法律合約 domain 失效的根本原因是異常信號倒置——對抗性毒文本由 LLM 生成，語言流暢，GPT-2 PPL 反低於真實合約原文，導致 Defense B（global=100, spike=150）完全無法觸發。
 
 ---
 
 ## Ablation 配置
 
-| 設定 | 說明 |
-|------|------|
-| `no_defense` | A、B 均關閉，純攻擊上限（基準線，尚未執行） |
-| `A + B（Voting）` | 語料庫一致性投票，完整兩點防護（本研究主要設定） |
-| `A + B（PPL）` | GPT-2 困惑度過濾，Ablation 對照組 |
+| 設定 | 狀態 | 說明 |
+|------|------|------|
+| `no_defense` | ✅ 已執行 | A、B 均關閉，純攻擊上限（基準線）；ASR=90%，輸出 `output/no_defense/` |
+| `A + B（Voting）` | ✅ 已執行 | 語料庫一致性投票，完整兩點防護（本研究主要設定）；ASR=30%，輸出 `output/voting/` |
+| `A + B（PPL）` | ✅ 已執行 | GPT-2 困惑度過濾，Ablation 對照組；ASR=60%，輸出 `output/ppl_defense/` |
 
 ---
 

@@ -108,7 +108,10 @@ for query in queries:
 
 ```
 main.py                             # 五階段管線主入口（--phase / --from-phase / --force）
-configs/experiment_01.yaml          # 模型、向量庫、防禦、評估模式設定
+configs/
+├── experiment_01.yaml              # 主實驗（Corpus Consistency Voting）
+├── experiment_ppl_defense.yaml     # PPL Ablation（GPT-2 困惑度過濾）
+└── experiment_no_defense.yaml      # 無防禦基準線
 data/queries.json                   # 規範查詢集（Phase 1、3、5 共用）
 src/
 ├── pipeline/
@@ -117,14 +120,19 @@ src/
 │   ├── phase3.py                   # 檢索 + 防禦點 B
 │   ├── phase4.py                   # 目標 LLM 生成
 │   └── phase5.py                   # 人工標註核心邏輯
-└── defense/filter.py               # ConsistencyDefenseFilter
+└── defense/
+    ├── filter.py                   # ConsistencyDefenseFilter（矛盾偵測 + 離題偵測）
+    └── filter_PPL.py               # PPLDefenseFilter（GPT-2 困惑度異常偵測）
 tools/annotate.py                   # Phase 5 CLI 入口
 output/
-├── phase1/   poison_chunks.json
-├── phase2/   audit_defense_a.jsonl + report.md
-├── phase3/   retrieval_results.json + audit_defense_b.jsonl + report.md
-├── phase4/   phase4_results.json + report.md
-└── phase5/   phase5_annotated.json + report.md（標註完成後產生）
+├── voting/        # Corpus Consistency Voting（主實驗）
+│   ├── phase1/   poison_chunks.json
+│   ├── phase2/   audit_defense_a.jsonl + report.md
+│   ├── phase3/   retrieval_results.json + audit_defense_b.jsonl + report.md
+│   ├── phase4/   phase4_results.json + report.md
+│   └── phase5/   phase5_annotated.json
+├── ppl_defense/   # PPL Ablation（phase2–5）
+└── no_defense/    # 無防禦基準線（phase1–5）
 ```
 
 重點：每次 run 都要落盤「config + seed + commit hash + metrics」，確保可重現。
@@ -168,7 +176,7 @@ output/
 
 1. **Defense A**（Phase 2）：LLM 矛盾偵測，比對 top_k_ref 筆乾淨參考 chunks（is_original=TRUE），矛盾 → 阻擋入庫（score=1.0）。
 2. **Defense B**（Phase 3）：Stage 1 同 A（矛盾偵測）+ Stage 2 離題偵測（針對 Blocker：chunk 來自不同法律領域則 score=0.7 阻擋）；兩階段均採物理 DELETE。
-3. 優先控制 DBR（毒文本不要漏掉），CDR 偏高（B 目前 42.11%）是已知取捨，後續可調整 Stage 2 的提示寬鬆度。
+3. 優先控制 DBR（毒文本不要漏掉），CDR 偏高（B 目前 40.00%）是已知取捨，後續可調整 Stage 2 的提示寬鬆度。
 4. Phase 3 若 Top-K 全被 B 攔截，Phase 4 仍需呼叫 Target LLM（通常會回 cannot find），這是 Phase 5 評估的依據。
 
 常見踩雷：只看分類準確率，不看 ASR 是否真的下降。
@@ -184,7 +192,7 @@ output/
 ## Phase 5: 人工評估
 
 1. 標註指引（含三種攻擊類型的判斷準則）必須**事先文件化**，不可在標註過程中改。
-2. 每筆標註必須包含：`attack_success`、`annotator`、`annotated_at`、`reason`。
+2. 每筆標註必須包含：`is_poisoned_answer`、`match_level`、`annotator_note`、`annotated_at`。
 3. 多人標註時計算 Cohen's Kappa；不一致樣本第三人複核。
 4. **Blocker 攻擊的判定方向相反**（拒答 = 成功），易誤標。
 5. 除 ASR 外至少再報：DBR-A、DBR-B、CDR-A、CDR-B、延遲變化。

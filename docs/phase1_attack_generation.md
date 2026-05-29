@@ -16,7 +16,7 @@
 |------|------|
 | **輸入** | `data/queries.json`（target query + malicious payload）<br/>CUAD 語料（自動從 HuggingFace Hub 下載） |
 | **輸出（DB）** | pgvector 中的 `n_clean_chunks` 筆 original chunks（`is_original=True`） |
-| **輸出（檔案）** | `output/phase1/poison_chunks.json`（含 `original_chunk_id` / `original_chunk_text`） |
+| **輸出（檔案）** | `output/<output_dir>/phase1/poison_chunks.json`（含 `original_chunk_id` / `original_chunk_text`） |
 | **執行約束** | 需要 pgvector 連線（Step A/B）、Embedding Model（Step B）、Attacker LLM（Step C） |
 
 ---
@@ -141,7 +141,7 @@ Either Party may terminate this Agreement upon fifteen (15) days prior written n
 
 ## 輸出 Metadata 規範
 
-每筆 Poisoned Chunk 記錄（`output/phase1/poison_chunks.json`）：
+每筆 Poisoned Chunk 記錄（`output/<output_dir>/phase1/poison_chunks.json`）：
 
 ```json
 {
@@ -233,7 +233,7 @@ generator = Phase1Generator(config)
 # run() 同時完成 Step A（預載 DB）+ Step B/C（攻擊生成）
 generator.run(
     queries=queries,
-    output_path="output/phase1/poison_chunks.json",
+    output_path="output/voting/phase1/poison_chunks.json",  # 依 --output-dir 調整
     attack_types=["hijack", "blocker", "stealth"],
 )
 ```
@@ -244,7 +244,7 @@ generator.run(
 
 Phase 1 結束後：
 - **pgvector** 中已有 `n_clean_chunks` 筆 `is_original=True` 的乾淨 chunks
-- **`output/phase1/poison_chunks.json`** 含有修改版 chunks（含 `original_chunk_id` 供審計）
+- **`output/<output_dir>/phase1/poison_chunks.json`** 含有修改版 chunks（含 `original_chunk_id` 供審計）
 
 Phase 2 接收 `poison_chunks.json`，嘗試將修改版 chunks 注入 DB，並以 Defense A 過濾。
 

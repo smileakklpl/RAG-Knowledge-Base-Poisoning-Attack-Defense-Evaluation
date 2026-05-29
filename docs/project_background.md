@@ -81,10 +81,10 @@
         ↓
 [Phase 4] 目標 LLM 生成回答
   Target LLM 接收 sanitized context → 產生回答
-  落盤 JSON 含 phase5 待標註欄位
+  落盤 JSON 含 annotation 待標註欄位
         ↓
 [Phase 5] 人工評估
-  人工逐筆判定 attack_success
+  人工逐筆判定 is_poisoned_answer
   計算 ASR（依攻擊類型分組報告）
 ```
 
@@ -129,11 +129,14 @@
 
 ## 7. 當前開發狀態
 
-管線 Phase 1–4 已全部實作完成並通過執行驗證，目前僅剩 Phase 5 人工標註：
+管線 Phase 1–5 已全部實作並完成三組實驗：
 
 - [x] Phase 1：預載 DB（200 clean chunks）+ 攻擊生成（30 poison chunks）
-- [x] Phase 2：注入嘗試 + Defense A（DBR-A=50%, CDR-A=5%）
-- [x] Phase 3：檢索 + Defense B（RSR=90%, DBR-B=80%, CDR-B=42.11%）
-- [x] Phase 4：Target LLM voting 生成（g=3, α=0.5，10 queries）
-- [ ] Phase 5：人工標註 → 計算 ASR（執行 `python main.py --phase 5`）
-- [ ] Ablation：`no_defense` / `only_A` / `only_B` / `A + B` 四組比較
+- [x] Phase 2：注入嘗試 + Defense A（Voting：DBR-A=46.67%, CDR-A=5.00%）
+- [x] Phase 3：檢索 + Defense B（Voting：RSR=90%, DBR-B=56.25%, CDR-B=40.00%）
+- [x] Phase 4：Target LLM voting 生成（g=3, α=0.5，avg latency≈169s）
+- [x] Phase 5：人工評估完成（Claude 代標，2026-05-28）
+- [x] Ablation：三組實驗完成
+  - No Defense（基準線）：ASR=90%，輸出 `output/no_defense/`
+  - PPL 困惑度過濾：ASR=60%，輸出 `output/ppl_defense/`
+  - Corpus Consistency Voting：**ASR=30%**，輸出 `output/voting/`

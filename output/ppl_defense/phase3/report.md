@@ -1,7 +1,7 @@
 # Phase 3 — Experiment Report
 
 **Run time**: 2026-05-28T06:53:00.388839+00:00  
-**Config**: `configs/experiment_01.yaml`  
+**Config**: `configs/experiment_ppl_defense.yaml`  
 **Defense method**: PPL Perplexity Filtering (GPT-2 anomaly detection)  
 **PPL model**: GPT-2 small  global_thresh=100.0  spike_thresh=150.0  
 **Top-K values tested**: [9]  
@@ -40,5 +40,5 @@
 - RSR measures attack strength (before defense); DBR-B measures defense effectiveness at B
 - Stealth attacks alter key facts while maintaining semantic similarity; consistency voting targets this
 - Physical DELETE applied incrementally: earlier queries' deletions affect later queries
-- Retrieval results with sanitized context: `output/phase3/retrieval_results.json`
-- Per-chunk audit log: `output/phase3/audit_defense_b.jsonl`
+- Retrieval results with sanitized context: `output/ppl_defense/phase3/retrieval_results.json`
+- Per-chunk audit log: `output/ppl_defense/phase3/audit_defense_b.jsonl`
