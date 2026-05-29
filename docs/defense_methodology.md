@@ -181,6 +181,8 @@ top-k chunks（Defense B 後）
 
 **防護原理**：毒 chunk 只在 1 組中，另外 g-1 組為乾淨資料；若毒組與乾淨組給出不同關鍵字（不同數字、不同地點），投票門檻使毒值無法通過。最終 LLM 被告知有衝突時會回報「資訊衝突」而非盲目接受毒值。
 
+**與原始 RobustRAG 的差異**：原論文的最終生成步驟以 voted keywords 作為輸出約束（只允許使用通過投票的關鍵字）；本實作改為將 g 個 isolated responses 全部送給 LLM，以共識萃取 prompt（「只回報大多數來源一致的資訊」）整合結果。voted keywords 仍有計算並記錄於輸出 log，但未直接約束生成。功能上類似，但非原版完整實作。
+
 **設定參數**：`voting_groups: 3`、`voting_alpha: 0.5`（需 2/3 組同意）
 
 ---
