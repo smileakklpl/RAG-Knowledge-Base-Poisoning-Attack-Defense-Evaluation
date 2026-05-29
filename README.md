@@ -1,5 +1,5 @@
 # RAG Knowledge Base Poisoning: Attack & Defense Evaluation
-## RAG Knowledge Base Poisoning: Attack & Defense Evaluation
+## 本專案僅用 Claude Code 協助程式碼與文件撰寫，但不涉及實驗流程設計。
 
 ---
 
