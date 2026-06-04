@@ -238,17 +238,35 @@ GPT-2 small 計算 global PPL
 
 ## 三實驗最終比較
 
-| 指標 | No Defense（基準線） | PPL（GPT-2 困惑度） | Voting（矛盾+離題偵測） | 備註 |
-|------|-------------------|-------------------|----------------------|------|
-| DBR-A | 0% | 20.00% | **46.67%** | Voting 對 Stealth/Hijack 最有效 |
-| CDR-A | 0% | **2.50%** | 5.00% | PPL 誤攔最低 |
-| RSR（pre-B） | 100% | 100% | **90%** | Voting Defense A 已攔截部分毒 chunk |
-| DBR-B | 0% | 0% | **56.25%** | PPL Defense B 完全失效 |
-| CDR-B | 0% | **12.00%** | 40.00% | Voting CDR-B 偏高（Stage 2 副作用） |
-| **ASR（Phase 5）** | 90% | 60% | **30%** | Voting 最終效果顯著優勝 |
-| **ASR 降幅 vs 基準** | — | ▼30pp | **▼60pp** | Voting 攻擊成功率減少 67% |
+| 指標 | No Defense | Only A（消融） | Only B（消融） | PPL（A+B） | Voting（A+B） |
+|------|-----------|--------------|--------------|-----------|-------------|
+| DBR-A | 0% | 46.67% | 0% | 20.00% | **46.67%** |
+| CDR-A | 0% | 5.00% | 0% | **2.50%** | 5.00% |
+| RSR（pre-B） | 100% | ~90% | 100% | 100% | **90%** |
+| DBR-B | 0% | —（B 關閉） | TBD | 0% | **56.25%** |
+| CDR-B | 0% | —（B 關閉） | TBD | **12.00%** | 40.00% |
+| **ASR（Phase 5）** | 90% | **20%** | TBD | 60% | **30%** |
+| **ASR 降幅 vs 基準** | — | **▼70pp** | TBD | ▼30pp | **▼60pp** |
 
-> **結論**：Voting 防禦將 ASR 從基準線 90% 降至 30%（減少 67%）；PPL 僅降至 60%。PPL 在法律合約 domain 失效的根本原因是異常信號倒置——對抗性毒文本由 LLM 生成，語言流暢，GPT-2 PPL 反低於真實合約原文，導致 Defense B（global=100, spike=150）完全無法觸發。
+> **已知結論**：Voting（A+B）防禦將 ASR 從基準線 90% 降至 30%（減少 67%）；PPL 僅降至 60%。Only A（僅防禦點 A）將 ASR 降至 20%（▼70pp），孤立表現優於完整 Voting A+B——推測原因：Defense B CDR-B=40% 誤殺大量乾淨 chunks，削弱 Phase 4 voting 的乾淨信號；關閉 B 後乾淨 context 更完整，voting 效率反而提升。Only B 消融結果待補。
+
+---
+
+## 關鍵發現：Defense B 的乾淨誤殺副作用
+
+**現象**：Only A（僅防禦點 A，ASR=20%）的最終攻擊防禦效果優於 Voting A+B（ASR=30%），儘管後者多啟用了一道防線。
+
+**機制分析**：
+
+Defense B（Phase 3 檢索後過濾）在 Voting 實驗中 CDR-B=40%，代表每次查詢的 Top-K=9 個 chunks 中，平均約 3-4 個乾淨 chunk 被物理刪除（誤判為惡意）。這批遭誤殺的乾淨 chunks 是 Phase 4 RobustRAG Voting 的核心信號來源——Voting 機制依賴各組輪詢到的乾淨 chunks 建立一致性基準，用以投票過濾毒化關鍵詞。
+
+當乾淨 chunks 大量流失：
+1. 各 voting group 中乾淨信號比例下降，毒化關鍵詞更容易通過投票門檻
+2. 「無毒 group」的數量減少，使最終 voted_keywords 更容易納入毒化內容
+
+關閉 Defense B 後（Only A），DB 保留完整的乾淨 chunks，Phase 4 voting 擁有更豐富的乾淨信號，反而能更有效地過濾殘餘毒化內容。
+
+**設計教訓**：防禦點之間存在交互效應。Defense B 的過激誤殺（高 CDR-B）會破壞下游防禦機制（Phase 4 voting）的前提假設。在現行實作下，**Defense A 單獨運作 + Phase 4 Voting** 是比 A+B 全開更有效的組合。降低 Defense B 的 CDR（提升 Stage 2 離題偵測的精確度）是改善完整管線效能的優先方向。
 
 ---
 
@@ -256,9 +274,11 @@ GPT-2 small 計算 global PPL
 
 | 設定 | 狀態 | 說明 |
 |------|------|------|
-| `no_defense` | ✅ 已執行 | A、B 均關閉，純攻擊上限（基準線）；ASR=90%，輸出 `output/no_defense/` |
-| `A + B（Voting）` | ✅ 已執行 | 語料庫一致性投票，完整兩點防護（本研究主要設定）；ASR=30%，輸出 `output/voting/` |
-| `A + B（PPL）` | ✅ 已執行 | GPT-2 困惑度過濾，Ablation 對照組；ASR=60%，輸出 `output/ppl_defense/` |
+| `no_defense` | 已執行 | A、B 均關閉，純攻擊上限（基準線）；ASR=90%，輸出 `output/no_defense/` |
+| `A + B（Voting）` | 已執行 | 語料庫一致性投票，完整兩點防護（本研究主要設定）；ASR=30%，輸出 `output/voting/` |
+| `A + B（PPL）` | 已執行 | GPT-2 困惑度過濾，Ablation 對照組；ASR=60%，輸出 `output/ppl_defense/` |
+| `only_a` | 已執行 | 僅防禦點 A（入庫前矛盾偵測）ON，B 關閉；Phase 4 voting；ASR=20%；輸出 `output/only_a/` |
+| `only_b` | 待執行 | 僅防禦點 B（檢索後矛盾+離題偵測）ON，A 關閉；Phase 4 voting；輸出 `output/only_b/` |
 
 ---
 

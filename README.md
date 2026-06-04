@@ -61,6 +61,18 @@ python main.py --config configs/experiment_ppl_defense.yaml \
                --phase1-dir output/voting \
                --phases 2 3 4 --force
 
+# ── Only A 消融（僅防禦點 A，輸出至 output/only_a/）──────
+python main.py --config configs/experiment_only_a.yaml \
+               --output-dir output/only_a \
+               --phase1-dir output/voting \
+               --phases 2 3 4 --force
+
+# ── Only B 消融（僅防禦點 B，輸出至 output/only_b/）──────
+python main.py --config configs/experiment_only_b.yaml \
+               --output-dir output/only_b \
+               --phase1-dir output/voting \
+               --phases 2 3 4 --force
+
 # ── 無防禦基準線（輸出至 output/no_defense/）─────────────
 python main.py --config configs/experiment_no_defense.yaml \
                --output-dir output/no_defense \
@@ -215,9 +227,11 @@ seed: 42                           # 隨機種子
 main.py                             # 五階段管線主入口（--phase / --from-phase / --force）
 
 configs/
-├── experiment_01.yaml              # 主實驗設定（Voting 防禦）
-├── experiment_ppl_defense.yaml     # PPL Ablation 設定（GPT-2 困惑度防禦）
-└── experiment_no_defense.yaml      # 無防禦基準線設定
+├── experiment_01.yaml              # 主實驗（Corpus Consistency Voting，A+B）
+├── experiment_ppl_defense.yaml     # PPL Ablation（GPT-2 困惑度防禦，A+B）
+├── experiment_no_defense.yaml      # 無防禦基準線
+├── experiment_only_a.yaml          # 消融：僅防禦點 A（入庫前矛盾偵測）
+└── experiment_only_b.yaml          # 消融：僅防禦點 B（檢索後矛盾+離題偵測）
 
 data/
 └── queries.json                    # 規範查詢集（Phase 1、3、5 共用）
@@ -258,6 +272,10 @@ output/                             # 實驗輸出（gitignored，按實驗分�
 │   └── phase2/3/4/5/（結構同上，無 phase1）
 ├── no_defense/     無防禦基準線（--output-dir output/no_defense）
 │   └── phase1/2/3/4/5/（結構同上）
+├── only_a/         消融：僅防禦點 A（--output-dir output/only_a）
+│   └── phase2/3/4/5/（結構同上，無 phase1）
+├── only_b/         消融：僅防禦點 B（--output-dir output/only_b）
+│   └── phase2/3/4/5/（結構同上，無 phase1）
 └── tests/          早期測試產物（mini_*.json、smoke_test_result.json、report.md）
 
 docs/
@@ -357,16 +375,22 @@ docs/
   - **RSR = 100%**（10/10 queries 全部命中毒 chunk，30/30 毒 chunks 全數入庫）
   - **ASR（No Defense）= 90%**（9/10：唯 q09 LLM 自行排斥「無因 48 小時終止」的不合理 payload）
 
-### 三實驗最終比較
+### 待完成
 
-| 指標 | No Defense（基準線） | PPL（GPT-2 困惑度） | Voting（矛盾+離題偵測） |
-|------|-------------------|-------------------|----------------------|
-| DBR-A | 0% | 20.00% | **46.67%** |
-| CDR-A | 0% | **2.50%** | 5.00% |
-| RSR（pre-B） | 100% | 100% | **90%** |
-| DBR-B | 0% | 0% | **56.25%** |
-| CDR-B | 0% | **12.00%** | 40.00% |
-| **ASR（Phase 5）** | 90% | 60% | **30%** |
-| **ASR 降幅 vs 基準** | — | ▼30pp | **▼60pp** |
+- [x] **Only A 消融實驗** — `configs/experiment_only_a.yaml`，僅防禦點 A（Defense B 關閉），Phase 4 voting，Claude 代標；**ASR=20%（▼70pp）**；輸出 `output/only_a/`
+  - 關鍵發現：Only A（20%）優於 Voting A+B（30%）。Defense B CDR-B=40% 誤殺大量乾淨 chunks，削弱 Phase 4 voting 的乾淨信號基礎；關閉 B 後 context 更乾淨，voting 反而更有效。詳見 `docs/defense_methodology.md` — 關鍵發現節。
+- [ ] **Only B 消融實驗** — `configs/experiment_only_b.yaml`，僅防禦點 B（Defense A 關閉），Phase 4 voting，Claude 代標；輸出 `output/only_b/`
 
-> **結論**：Voting 防禦將 ASR 從基準 90% 降至 30%，攻擊成功率減少 67%；PPL 防禦僅降至 60%，效果有限。PPL 的失效根因是法律合約 domain 中異常信號倒置（LLM 毒文本 PPL 反低），Voting 的語意矛盾偵測不受此影響。
+### 五實驗消融比較（Only B 待執行）
+
+| 指標 | No Defense | Only A（消融） | Only B（消融） | PPL（A+B） | Voting（A+B） |
+|------|-----------|--------------|--------------|-----------|-------------|
+| DBR-A | 0% | 46.67% | 0% | 20.00% | **46.67%** |
+| CDR-A | 0% | 5.00% | 0% | **2.50%** | 5.00% |
+| RSR（pre-B） | 100% | ~90% | 100% | 100% | **90%** |
+| DBR-B | 0% | —（B 關閉） | TBD | 0% | **56.25%** |
+| CDR-B | 0% | —（B 關閉） | TBD | **12.00%** | 40.00% |
+| **ASR（Phase 5）** | 90% | **20%** | TBD | 60% | **30%** |
+| **ASR 降幅 vs 基準** | — | **▼70pp** | TBD | ▼30pp | **▼60pp** |
+
+> **已知結論**：Voting（A+B）防禦將 ASR 從基準 90% 降至 30%（減少 67%）；PPL 僅降至 60%，效果有限。Only A（僅防禦點 A）ASR=20%（▼70pp），孤立表現優於 Voting A+B，推測因 Defense B CDR-B=40% 誤殺乾淨 chunks 削弱了 Phase 4 voting 的乾淨信號。Only B 消融結果待補。
