@@ -222,7 +222,7 @@ defense:
 - [x] **Phase 5** — 人工評估（Claude 代標，Voting ASR=30%、PPL ASR=60%、No Defense ASR=90%）
 - [x] **防禦方法論** — 語料庫一致性投票（LLM 矛盾偵測 + 離題偵測）+ PPL 困惑度過濾（Ablation）
 - [x] **Only A 消融實驗** — Defense A ON / B OFF，Phase 4 voting，Claude 代標；**ASR=20%（▼70pp）**；輸出 `output/only_a/`
-- [ ] **Only B 消融實驗** — Defense A OFF / B ON，Phase 4 voting，Claude 代標；輸出 `output/only_b/`
+- [x] **Only B 消融實驗** — Defense A OFF / B ON，Phase 4 voting，Claude 代標；**ASR=70%（▼20pp）**；輸出 `output/only_b/`
 
 ---
 

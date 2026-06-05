@@ -236,25 +236,25 @@ GPT-2 small 計算 global PPL
 
 ---
 
-## 三實驗最終比較
+## 五實驗最終比較
 
 | 指標 | No Defense | Only A（消融） | Only B（消融） | PPL（A+B） | Voting（A+B） |
 |------|-----------|--------------|--------------|-----------|-------------|
-| DBR-A | 0% | 46.67% | 0% | 20.00% | **46.67%** |
-| CDR-A | 0% | 5.00% | 0% | **2.50%** | 5.00% |
-| RSR（pre-B） | 100% | ~90% | 100% | 100% | **90%** |
-| DBR-B | 0% | —（B 關閉） | TBD | 0% | **56.25%** |
-| CDR-B | 0% | —（B 關閉） | TBD | **12.00%** | 40.00% |
-| **ASR（Phase 5）** | 90% | **20%** | TBD | 60% | **30%** |
-| **ASR 降幅 vs 基準** | — | **▼70pp** | TBD | ▼30pp | **▼60pp** |
+| DBR-A | 0% | **53.33%** | 0% | 20.00% | **46.67%** |
+| CDR-A | 0% | **0.00%** | 0% | **2.50%** | 5.00% |
+| RSR（pre-B） | 100% | 100% | 100% | 100% | **90%** |
+| DBR-B | 0% | —（B 關閉） | **76.67%** | 0% | **56.25%** |
+| CDR-B | 0% | —（B 關閉） | **37.50%** | **12.00%** | 40.00% |
+| **ASR（Phase 5）** | 90% | **20%** | **70%** | 60% | **30%** |
+| **ASR 降幅 vs 基準** | — | **▼70pp** | ▼20pp | ▼30pp | **▼60pp** |
 
-> **已知結論**：Voting（A+B）防禦將 ASR 從基準線 90% 降至 30%（減少 67%）；PPL 僅降至 60%。Only A（僅防禦點 A）將 ASR 降至 20%（▼70pp），孤立表現優於完整 Voting A+B——推測原因：Defense B CDR-B=40% 誤殺大量乾淨 chunks，削弱 Phase 4 voting 的乾淨信號；關閉 B 後乾淨 context 更完整，voting 效率反而提升。Only B 消融結果待補。
+> **消融結論**：Defense A 是主導防禦層——入庫前阻斷（Only A 實測 DBR-A=53.33%）使 Only A 單獨達到 ASR=20%（▼70pp），優於完整 Voting A+B（30%）。Only B（僅後過濾，DBR-B=76.67% / CDR-B=37.50%）ASR=70%（▼20pp），遜於 PPL A+B（60%），遠遜 Voting A+B——即使 DBR-B 高達 76.67%，在無 Defense A 把關入庫、全毒負載全數進 DB 的情況下，後過濾仍難以有效壓制攻擊。Defense B CDR-B=37.50% 誤殺乾淨 chunks 削弱 Phase 4 voting 信號，導致完整 A+B 效果反不如 Only A。降低 Defense B 的 CDR（提升 Stage 2 精確度）是改善管線的優先方向。
 
 ---
 
 ## 關鍵發現：Defense B 的乾淨誤殺副作用
 
-**現象**：Only A（僅防禦點 A，ASR=20%）的最終攻擊防禦效果優於 Voting A+B（ASR=30%），儘管後者多啟用了一道防線。
+**現象**：Only A（僅防禦點 A，ASR=20%）的最終防禦效果優於 Voting A+B（ASR=30%），儘管後者多啟用了一道防線；Only B（僅防禦點 B，ASR=70%）遠遜 Only A，甚至劣於 PPL A+B（60%），顯示 Defense A 是管線的主導防禦層。
 
 **機制分析**：
 
@@ -278,7 +278,7 @@ Defense B（Phase 3 檢索後過濾）在 Voting 實驗中 CDR-B=40%，代表每
 | `A + B（Voting）` | 已執行 | 語料庫一致性投票，完整兩點防護（本研究主要設定）；ASR=30%，輸出 `output/voting/` |
 | `A + B（PPL）` | 已執行 | GPT-2 困惑度過濾，Ablation 對照組；ASR=60%，輸出 `output/ppl_defense/` |
 | `only_a` | 已執行 | 僅防禦點 A（入庫前矛盾偵測）ON，B 關閉；Phase 4 voting；ASR=20%；輸出 `output/only_a/` |
-| `only_b` | 待執行 | 僅防禦點 B（檢索後矛盾+離題偵測）ON，A 關閉；Phase 4 voting；輸出 `output/only_b/` |
+| `only_b` | 已執行 | 僅防禦點 B（檢索後矛盾+離題偵測）ON，A 關閉；Phase 4 voting；ASR=70%；輸出 `output/only_b/` |
 
 ---
 

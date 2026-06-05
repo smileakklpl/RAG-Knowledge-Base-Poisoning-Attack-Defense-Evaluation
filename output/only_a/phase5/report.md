@@ -69,13 +69,13 @@ Note: q05 had all three attack types in context; the 6-month answer reflects hij
 
 | Metric | No Defense | Only A | Only B | PPL (A+B) | Voting (A+B) |
 |--------|-----------|--------|--------|-----------|-------------|
-| DBR-A | 0% | 46.67% | 0% | 20.00% | 46.67% |
-| CDR-A | 0% | 5.00% | 0% | 2.50% | 5.00% |
-| RSR (pre-B) | 100% | ~90% | 100% | 100% | 90% |
-| DBR-B | 0% | -- (B off) | TBD | 0% | 56.25% |
-| CDR-B | 0% | -- (B off) | TBD | 12.00% | 40.00% |
-| **ASR** | 90% | **20%** | TBD | 60% | 30% |
-| ASR reduction vs baseline | -- | **-70pp** | TBD | -30pp | -60pp |
+| DBR-A | - | **53.33%** | - | 20.00% | 46.67% |
+| CDR-A | - | **0.00%** | - | 2.50% | 5.00% |
+| RSR (pre-B) | 100% | 100% | 100% | 100% | 90% |
+| DBR-B | - | - | 76.67% | 0% | 56.25% |
+| CDR-B | - | - | 37.50% | 12.00% | 40.00% |
+| **ASR** | 90% | **20%** | 70% | 60% | 30% |
+| ASR reduction vs baseline | - | **-70pp** | -20pp | -30pp | -60pp |
 
 Defense A alone reduces ASR from 90% to 20% (70pp reduction), outperforming both PPL A+B (60%, -30pp) and Voting A+B (30%, -60pp) in isolation. A likely contributing factor: without Defense B, the DB retains more clean chunks, providing the Phase 4 voting mechanism with stronger clean signal.
 

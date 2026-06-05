@@ -140,9 +140,9 @@ sanitized_contexts.json   ──►   for query in all_queries:
 | 變數 | 實際設定 |
 |------|---------|
 | Top-K | 9（Voting 3 組 × 3 chunks） |
-| 防禦設定 | No Defense / PPL / Voting（三組，見 `docs/defense_methodology.md`） |
+| 防禦設定 | No Defense / PPL / Voting / Only A / Only B（五組，見 `docs/defense_methodology.md`） |
 | 攻擊類型 | hijack、blocker、stealth（每 query 同時三型，30 poison chunks） |
-| Random Seed | 42（單一 seed，三組實驗共用） |
+| Random Seed | 42（單一 seed，五組實驗共用） |
 | Poison chunks | 30（10 queries × 3 types）/ Clean chunks：200 |
 
 ---

@@ -379,18 +379,18 @@ docs/
 
 - [x] **Only A 消融實驗** — `configs/experiment_only_a.yaml`，僅防禦點 A（Defense B 關閉），Phase 4 voting，Claude 代標；**ASR=20%（▼70pp）**；輸出 `output/only_a/`
   - 關鍵發現：Only A（20%）優於 Voting A+B（30%）。Defense B CDR-B=40% 誤殺大量乾淨 chunks，削弱 Phase 4 voting 的乾淨信號基礎；關閉 B 後 context 更乾淨，voting 反而更有效。詳見 `docs/defense_methodology.md` — 關鍵發現節。
-- [ ] **Only B 消融實驗** — `configs/experiment_only_b.yaml`，僅防禦點 B（Defense A 關閉），Phase 4 voting，Claude 代標；輸出 `output/only_b/`
+- [x] **Only B 消融實驗** — `configs/experiment_only_b.yaml`，僅防禦點 B（Defense A 關閉），Phase 4 voting，Claude 代標；**ASR=70%（▼20pp）**；輸出 `output/only_b/`
 
-### 五實驗消融比較（Only B 待執行）
+### 五實驗消融比較（完整）
 
 | 指標 | No Defense | Only A（消融） | Only B（消融） | PPL（A+B） | Voting（A+B） |
 |------|-----------|--------------|--------------|-----------|-------------|
-| DBR-A | 0% | 46.67% | 0% | 20.00% | **46.67%** |
-| CDR-A | 0% | 5.00% | 0% | **2.50%** | 5.00% |
-| RSR（pre-B） | 100% | ~90% | 100% | 100% | **90%** |
-| DBR-B | 0% | —（B 關閉） | TBD | 0% | **56.25%** |
-| CDR-B | 0% | —（B 關閉） | TBD | **12.00%** | 40.00% |
-| **ASR（Phase 5）** | 90% | **20%** | TBD | 60% | **30%** |
-| **ASR 降幅 vs 基準** | — | **▼70pp** | TBD | ▼30pp | **▼60pp** |
+| DBR-A | - | **53.33%** | - | 20.00% | **46.67%** |
+| CDR-A | - | **0.00%** | - | **2.50%** | 5.00% |
+| RSR（pre-B） | 100% | 100% | 100% | 100% | **90%** |
+| DBR-B | - | - | **76.67%** | 0% | **56.25%** |
+| CDR-B | - | - | **37.50%** | **12.00%** | 40.00% |
+| **ASR（Phase 5）** | 90% | **20%** | **70%** | 60% | **30%** |
+| **ASR 降幅 vs 基準** | - | **▼70pp** | ▼20pp | ▼30pp | **▼60pp** |
 
-> **已知結論**：Voting（A+B）防禦將 ASR 從基準 90% 降至 30%（減少 67%）；PPL 僅降至 60%，效果有限。Only A（僅防禦點 A）ASR=20%（▼70pp），孤立表現優於 Voting A+B，推測因 Defense B CDR-B=40% 誤殺乾淨 chunks 削弱了 Phase 4 voting 的乾淨信號。Only B 消融結果待補。
+> **消融結論**：Defense A 是主導防禦層——Only A 單獨達到 ASR=20%（▼70pp），優於完整 Voting A+B（30%）。Only B 單獨 ASR=70%（▼20pp），遜於 PPL A+B（60%），遠遜 Only A——即使 DBR-B=76.67%，在無 Defense A 的全毒負載下仍無法阻擋整體攻擊。Defense B CDR-B=40% 誤殺乾淨 chunks 削弱 Phase 4 voting 信號，是 Voting A+B 效果不如 Only A 的主要原因。詳見 `docs/defense_methodology.md` — 關鍵發現節。

@@ -111,7 +111,9 @@ main.py                             # 五階段管線主入口（--phase / --fro
 configs/
 ├── experiment_01.yaml              # 主實驗（Corpus Consistency Voting）
 ├── experiment_ppl_defense.yaml     # PPL Ablation（GPT-2 困惑度過濾）
-└── experiment_no_defense.yaml      # 無防禦基準線
+├── experiment_no_defense.yaml      # 無防禦基準線
+├── experiment_only_a.yaml          # 消融：僅防禦點 A
+└── experiment_only_b.yaml          # 消融：僅防禦點 B
 data/queries.json                   # 規範查詢集（Phase 1、3、5 共用）
 src/
 ├── pipeline/
@@ -132,7 +134,9 @@ output/
 │   ├── phase4/   phase4_results.json + report.md
 │   └── phase5/   phase5_annotated.json + report.md
 ├── ppl_defense/   # PPL Ablation（phase2–5）
-└── no_defense/    # 無防禦基準線（phase1–5）
+├── no_defense/    # 無防禦基準線（phase1–5）
+├── only_a/        # 消融：僅防禦點 A（phase2–5）
+└── only_b/        # 消融：僅防禦點 B（phase2–5）
 ```
 
 重點：每次 run 都要落盤「config + seed + commit hash + metrics」，確保可重現。

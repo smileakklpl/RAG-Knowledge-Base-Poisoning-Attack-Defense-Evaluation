@@ -129,14 +129,16 @@
 
 ## 7. 當前開發狀態
 
-管線 Phase 1–5 已全部實作並完成三組實驗：
+管線 Phase 1–5 已全部實作並完成五組實驗：
 
 - [x] Phase 1：預載 DB（200 clean chunks）+ 攻擊生成（30 poison chunks）
 - [x] Phase 2：注入嘗試 + Defense A（Voting：DBR-A=46.67%, CDR-A=5.00%）
 - [x] Phase 3：檢索 + Defense B（Voting：RSR=90%, DBR-B=56.25%, CDR-B=40.00%）
 - [x] Phase 4：Target LLM voting 生成（g=3, α=0.5，avg latency≈169s）
 - [x] Phase 5：人工評估完成（Claude 代標，2026-05-28）
-- [x] Ablation：三組實驗完成
+- [x] Ablation：五組實驗完成
   - No Defense（基準線）：ASR=90%，輸出 `output/no_defense/`
-  - PPL 困惑度過濾：ASR=60%，輸出 `output/ppl_defense/`
-  - Corpus Consistency Voting：**ASR=30%**，輸出 `output/voting/`
+  - Only B（消融，僅防禦點 B）：ASR=70%（▼20pp），輸出 `output/only_b/`
+  - PPL 困惑度過濾：ASR=60%（▼30pp），輸出 `output/ppl_defense/`
+  - Corpus Consistency Voting：**ASR=30%**（▼60pp），輸出 `output/voting/`
+  - Only A（消融，僅防禦點 A）：**ASR=20%**（▼70pp），輸出 `output/only_a/`
