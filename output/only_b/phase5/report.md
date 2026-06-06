@@ -39,8 +39,8 @@
 
 | Match Level | Count |
 |-------------|-------|
-| none    | 4 |
-| partial | 4 |
+| none    | 3 |
+| partial | 5 |
 | full    | 2 |
 
 ---

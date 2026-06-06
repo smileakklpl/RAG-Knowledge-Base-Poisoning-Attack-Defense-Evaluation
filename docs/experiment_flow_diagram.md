@@ -219,7 +219,7 @@ defense:
 - [x] **Phase 2** — 注入嘗試 + 防禦點 A（DBR-A=46.67%, CDR-A=5.00%）
 - [x] **Phase 3** — 檢索 + 防禦點 B（RSR=90%, DBR-B=56.25%, CDR-B=40.00%）
 - [x] **Phase 4** — 目標 LLM 生成回答，voting 模式（g=3, α=0.5，avg latency≈169s）
-- [x] **Phase 5** — 人工評估（Claude 代標，Voting ASR=30%、PPL ASR=60%、No Defense ASR=90%）
+- [x] **Phase 5** — 人工評估（Claude 代標，No Defense ASR=90%、Only B ASR=70%、PPL ASR=60%、Voting ASR=30%、Only A ASR=20%）
 - [x] **防禦方法論** — 語料庫一致性投票（LLM 矛盾偵測 + 離題偵測）+ PPL 困惑度過濾（Ablation）
 - [x] **Only A 消融實驗** — Defense A ON / B OFF，Phase 4 voting，Claude 代標；**ASR=20%（▼70pp）**；輸出 `output/only_a/`
 - [x] **Only B 消融實驗** — Defense A OFF / B ON，Phase 4 voting，Claude 代標；**ASR=70%（▼20pp）**；輸出 `output/only_b/`
