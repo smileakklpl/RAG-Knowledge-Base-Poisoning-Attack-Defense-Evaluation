@@ -374,9 +374,6 @@ docs/
   - Defense A/B 均關閉，`defense_mode: standard`（無 Voting），標準 RAG 直接回答
   - **RSR = 100%**（10/10 queries 全部命中毒 chunk，30/30 毒 chunks 全數入庫）
   - **ASR（No Defense）= 90%**（9/10：唯 q09 LLM 自行排斥「無因 48 小時終止」的不合理 payload）
-
-### 待完成
-
 - [x] **Only A 消融實驗** — `configs/experiment_only_a.yaml`，僅防禦點 A（Defense B 關閉），Phase 4 voting，Claude 代標；**ASR=20%（▼70pp）**；輸出 `output/only_a/`
   - 關鍵發現：Only A（20%）優於 Voting A+B（30%）。Defense B CDR-B=40% 誤殺大量乾淨 chunks，削弱 Phase 4 voting 的乾淨信號基礎；關閉 B 後 context 更乾淨，voting 反而更有效。詳見 `docs/defense_methodology.md` — 關鍵發現節。
 - [x] **Only B 消融實驗** — `configs/experiment_only_b.yaml`，僅防禦點 B（Defense A 關閉），Phase 4 voting，Claude 代標；**ASR=70%（▼20pp）**；輸出 `output/only_b/`

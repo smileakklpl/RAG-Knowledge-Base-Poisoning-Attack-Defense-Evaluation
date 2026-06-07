@@ -250,6 +250,8 @@ GPT-2 small 計算 global PPL
 
 > **消融結論**：Defense A 是主導防禦層——入庫前阻斷（Only A 實測 DBR-A=53.33%）使 Only A 單獨達到 ASR=20%（▼70pp），優於完整 Voting A+B（30%）。Only B（僅後過濾，DBR-B=76.67% / CDR-B=37.50%）ASR=70%（▼20pp），遜於 PPL A+B（60%），遠遜 Voting A+B——即使 DBR-B 高達 76.67%，在無 Defense A 把關入庫、全毒負載全數進 DB 的情況下，後過濾仍難以有效壓制攻擊。Defense B CDR-B=37.50% 誤殺乾淨 chunks 削弱 Phase 4 voting 信號，導致完整 A+B 效果反不如 Only A。降低 Defense B 的 CDR（提升 Stage 2 精確度）是改善管線的優先方向。
 
+> **實驗設計說明**：`no_defense` 使用 `standard` 生成模式（無 Voting），其餘四組均使用 `voting`，目的是以「完全無防禦」作為真實基準線。比較 `no_defense` 與其他組時，需注意兩者同時存在防禦設定與生成策略的差異。DBR-A 數值在不同實驗組間可能出現小幅差異（約 ±2 筆），原因為矛盾偵測 LLM 的輸出存在 run-to-run 隨機性，並非設定差異所致。
+
 ---
 
 ## 關鍵發現：Defense B 的乾淨誤殺副作用
